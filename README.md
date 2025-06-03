@@ -15,8 +15,8 @@ When you're building real-time applications, testing with static JSON files or o
 
 ### Try It Live
 Before setting up locally, you can explore MatchPulse immediately:
-- **Demo API**: [https://matchpulse-demo.railway.app](https://matchpulse-demo.railway.app)
-- **Live Matches**: [https://matchpulse-demo.railway.app/api/v1/matches](https://matchpulse-demo.railway.app/api/v1/matches)
+- **Demo API**: [https://matchpulse-api.onrender.com](https://matchpulse-api.onrender.com)
+- **Live Matches**: [https://matchpulse-api.onrender.com/api/v1/matches](https://matchpulse-api.onrender.com/api/v1/matches)
 
 ### Local Development
 
