@@ -171,14 +171,6 @@ Commentary system designed for streaming audio integration:
 📅 Season (38 matches) → Track Statistics → End Season → Crown Champions → Reset & Start New Season
 ```
 
-## 🌐 Network Simulation
-
-MatchPulse includes realistic network condition simulation:
-
-- **95% Ultra-fast responses** (< 50ms) - Test optimal conditions
-- **3% Slow responses** (5-15 seconds) - Test loading states
-- **2% Timeouts** (35+ seconds) - Test error handling
-
 This helps you build resilient applications that handle real-world network conditions.
 
 ## 🏗️ Contributing

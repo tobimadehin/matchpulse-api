@@ -469,7 +469,6 @@ var commentaryTemplates = []string{
 	"The ball goes out for a throw-in",
 }
 
-// Network simulation middleware
 func applicationMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		next.ServeHTTP(w, r)
@@ -1686,7 +1685,6 @@ func serveHomepage(w http.ResponseWriter, r *http.Request) {
 <li>90-second realistic matches with 15-second cooldown</li>
 <li>Live player locations and ratings</li>
 <li>Season simulation with historical data (10 seasons)</li>
-<li>Network simulation (95% fast, 5% slow/timeout)</li>
 <li>Audio-ready commentary with speed controls</li>
 <li>Player characteristics and dynamic stats</li>
 </ul>
