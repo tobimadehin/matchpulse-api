@@ -1679,6 +1679,7 @@ func serveHomepage(w http.ResponseWriter, r *http.Request) {
 <li><a href="/api/v1/season/history">Season History</a></li>
 <li><a href="/api/v1/season/stats">Season Stats</a></li>
 <li><a href="/api/v1/search?q=manchester">Search</a></li>
+<li><a href="/tables">View Tables</a></li>
 </ul>
 <h2>Features</h2>
 <ul>
