@@ -207,37 +207,38 @@ var (
 
 // Enhanced team data with IDs and more information
 var teamData = []struct {
-	ID       int
-	Name     string
+	ID        int
+	Name      string
 	ShortName string
-	Stadium  string
-	League   string
-	Manager  string
-	Founded  int
+	Stadium   string
+	League    string
+	Manager   string
+	Founded   int
+	Country   string
 }{
 	// Premier League teams
-	{1, "Arsenal", "ARS", "Emirates Stadium", LeaguePremier, "Mikel Arteta", 1886},
-	{2, "Chelsea", "CHE", "Stamford Bridge", LeaguePremier, "Mauricio Pochettino", 1905},
-	{3, "Liverpool", "LIV", "Anfield", LeaguePremier, "Jürgen Klopp", 1892},
-	{4, "Manchester City", "MCI", "Etihad Stadium", LeaguePremier, "Pep Guardiola", 1880},
-	{5, "Manchester United", "MUN", "Old Trafford", LeaguePremier, "Erik ten Hag", 1878},
-	{6, "Tottenham", "TOT", "Tottenham Hotspur Stadium", LeaguePremier, "Ange Postecoglou", 1882},
-	{7, "Newcastle United", "NEW", "St. James' Park", LeaguePremier, "Eddie Howe", 1892},
-	{8, "Brighton", "BHA", "American Express Stadium", LeaguePremier, "Roberto De Zerbi", 1901},
-	{9, "Aston Villa", "AVL", "Villa Park", LeaguePremier, "Unai Emery", 1874},
-	{10, "West Ham United", "WHU", "London Stadium", LeaguePremier, "David Moyes", 1895},
-	
+	{1, "Arsenal FC", "ARS", "Emirates Stadium", LeaguePremier, "Mikel Arteta", 1886, "England"},
+	{2, "Chelsea FC", "CHE", "Stamford Bridge", LeaguePremier, "Mauricio Pochettino", 1905, "England"},
+	{3, "Liverpool FC", "LIV", "Anfield", LeaguePremier, "Jürgen Klopp", 1892, "England"},
+	{4, "Manchester City FC", "MCI", "Etihad Stadium", LeaguePremier, "Pep Guardiola", 1880, "England"},
+	{5, "Manchester United", "MUN", "Old Trafford", LeaguePremier, "Erik ten Hag", 1878, "England"},
+	{6, "Tottenham Hotspur", "TOT", "Tottenham Hotspur Stadium", LeaguePremier, "Ange Postecoglou", 1882, "England"},
+	{7, "Newcastle United", "NEW", "St. James' Park", LeaguePremier, "Eddie Howe", 1892, "England"},
+	{8, "Brighton & Hove Albion", "BHA", "American Express Stadium", LeaguePremier, "Roberto De Zerbi", 1901, "England"},
+	{9, "Aston Villa", "AVL", "Villa Park", LeaguePremier, "Unai Emery", 1874, "England"},
+	{10, "West Ham United", "WHU", "London Stadium", LeaguePremier, "David Moyes", 1895, "England"},
+
 	// La Liga teams
-	{11, "Real Madrid", "RMA", "Santiago Bernabéu", LeagueLaLiga, "Carlo Ancelotti", 1902},
-	{12, "Barcelona", "BAR", "Camp Nou", LeagueLaLiga, "Xavi Hernández", 1899},
-	{13, "Atletico Madrid", "ATM", "Metropolitano Stadium", LeagueLaLiga, "Diego Simeone", 1903},
-	{14, "Athletic Bilbao", "ATH", "San Mamés", LeagueLaLiga, "Ernesto Valverde", 1898},
-	{15, "Real Sociedad", "RSO", "Reale Arena", LeagueLaLiga, "Imanol Alguacil", 1909},
-	{16, "Villarreal", "VIL", "Estadio de la Cerámica", LeagueLaLiga, "Marcelino García", 1923},
-	{17, "Sevilla", "SEV", "Ramón Sánchez-Pizjuán Stadium", LeagueLaLiga, "José Luis Mendilibar", 1890},
-	{18, "Real Betis", "BET", "Benito Villamarín Stadium", LeagueLaLiga, "Manuel Pellegrini", 1907},
-	{19, "Valencia", "VAL", "Mestalla", LeagueLaLiga, "Rubén Baraja", 1919},
-	{20, "Getafe", "GET", "Coliseum Alfonso Pérez", LeagueLaLiga, "José Bordalás", 1983},
+	{11, "Real Madrid", "RMA", "Santiago Bernabéu", LeagueLaLiga, "Carlo Ancelotti", 1902, "Spain"},
+	{12, "FC Barcelona", "BAR", "Camp Nou", LeagueLaLiga, "Xavi Hernández", 1899, "Spain"},
+	{13, "Atlético de Madrid", "ATM", "Metropolitano Stadium", LeagueLaLiga, "Diego Simeone", 1903, "Spain"},
+	{14, "Athletic Bilbao", "ATH", "San Mamés", LeagueLaLiga, "Ernesto Valverde", 1898, "Spain"},
+	{15, "Real Sociedad", "RSO", "Reale Arena", LeagueLaLiga, "Imanol Alguacil", 1909, "Spain"},
+	{16, "Villarreal CF", "VIL", "Estadio de la Cerámica", LeagueLaLiga, "Marcelino García", 1923, "Spain"},
+	{17, "Sevilla FC", "SEV", "Ramón Sánchez-Pizjuán Stadium", LeagueLaLiga, "José Luis Mendilibar", 1890, "Spain"},
+	{18, "Real Betis Balompié", "BET", "Benito Villamarín Stadium", LeagueLaLiga, "Manuel Pellegrini", 1907, "Spain"},
+	{19, "Valencia CF", "VAL", "Mestalla", LeagueLaLiga, "Rubén Baraja", 1919, "Spain"},
+	{20, "Getafe CF", "GET", "Coliseum Alfonso Pérez", LeagueLaLiga, "José Bordalás", 1983, "Spain"},
 }
 
 // Player names with positions for realistic squads
@@ -319,15 +320,29 @@ func initializeTeams() {
 	defer mutex.Unlock()
 	
 	for _, teamInfo := range teamData {
+		// Determine the correct subfolder based on country and league
+		var leagueFolder string
+		switch teamInfo.Country {
+		case "England":
+			leagueFolder = "England%20-%20Premier%20League"
+		case "Spain":
+			leagueFolder = "Spain%20-%20LaLiga"
+		default:
+			leagueFolder = "Unknown"
+		}
+	
+		// URL-encode team name
+		teamName := strings.ReplaceAll(teamInfo.Name, " ", "%20")
+	
 		teams[teamInfo.ID] = &TeamInfo{
-			ID:       teamInfo.ID,
-			Name:     teamInfo.Name,
+			ID:        teamInfo.ID,
+			Name:      teamInfo.Name,
 			ShortName: teamInfo.ShortName,
-			LogoURL:  fmt.Sprintf("https://ui-avatars.com/api/?name=%s&background=random&size=128", strings.ReplaceAll(teamInfo.ShortName, " ", "+")),
-			Stadium:  teamInfo.Stadium,
-			Founded:  teamInfo.Founded,
-			Manager:  teamInfo.Manager,
-			League:   teamInfo.League,
+			LogoURL:   fmt.Sprintf("https://raw.githubusercontent.com/luukhopman/football-logos/master/logos/%s/%s.png", leagueFolder, teamName),
+			Stadium:   teamInfo.Stadium,
+			Founded:   teamInfo.Founded,
+			Manager:   teamInfo.Manager,
+			League:    teamInfo.League,
 		}
 	}
 }
