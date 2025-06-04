@@ -2171,6 +2171,8 @@ func main() {
 	// Apply application middleware
 	r.Use(applicationMiddleware)
 
+	r.HandleFunc("/tables", getTableData).Methods("GET")
+
 	// API routes
 	api := r.PathPrefix("/api/v1").Subrouter()
 
@@ -2198,9 +2200,6 @@ func main() {
 	api.HandleFunc("/teams/{id:[0-9]+}/form", getTeamForm).Methods("GET")
 	api.HandleFunc("/league/{league}/form", getLeagueForm).Methods("GET")
 	api.HandleFunc("/matchday/{matchday:[0-9]+}", getMatchdaySchedule).Methods("GET")
-
-	// Add the new table view endpoint
-	api.HandleFunc("/tables", getTableData).Methods("GET")
 
 	r.HandleFunc("/", serveHomepage).Methods("GET")
 
