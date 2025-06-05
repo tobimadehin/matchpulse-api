@@ -17,8 +17,8 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/go-fuego/fuego"
 	"github.com/gorilla/mux"
-	"github.com/rs/cors"
 )
 
 // String constants for optimization
@@ -1229,9 +1229,32 @@ func updateGlobalStats() {
 
 // HTTP Handlers (maintaining backward compatibility)
 func getAllMatches(w http.ResponseWriter, r *http.Request) {
+	// Get query parameters
+	status := r.URL.Query().Get("status")
+	league := r.URL.Query().Get("league")
+	teamIDStr := r.URL.Query().Get("team_id")
+
 	mutex.RLock()
 	matchList := make([]*Match, 0, len(matches))
 	for _, match := range matches {
+		// Apply status filter
+		if status != "" && match.Status != status {
+			continue
+		}
+
+		// Apply league filter
+		if league != "" && match.Competition != league {
+			continue
+		}
+
+		// Apply team filter
+		if teamIDStr != "" {
+			teamID, err := strconv.Atoi(teamIDStr)
+			if err == nil && match.HomeTeam.ID != teamID && match.AwayTeam.ID != teamID {
+				continue
+			}
+		}
+
 		matchList = append(matchList, match)
 	}
 	mutex.RUnlock()
@@ -1653,42 +1676,195 @@ func serveHomepage(w http.ResponseWriter, r *http.Request) {
 
 	const htmlTemplate = `<!DOCTYPE html>
 <html>
-<head><title>MatchPulse API v{{.Version}} - Extended Football Simulation</title></head>
-<body style="font-family: system-ui; max-width: 800px; margin: 0 auto; padding: 2rem;">
-<h1>MatchPulse API v{{.Version}}</h1>
-<p>Extended real-time football simulation for state management testing</p>
-<h2>Simulation Status</h2>
-<ul>
-<li>Active Matches: {{.ActiveMatches}}</li>
-<li>Total Players: {{.TotalPlayers}}</li>
-<li>Total Teams: {{.TotalTeams}}</li>
-<li>Current Season: {{.CurrentSeason}}</li>
-<li>Current Matchweek: {{.CurrentMatchweek}}</li>
-</ul>
-<h2>Core Endpoints</h2>
-<ul>
-<li><a href="/api/v1/players">Players</a></li>
-<li><a href="/api/v1/teams">Teams</a></li>
-<li><a href="/api/v1/matches">Matches</a></li>
-<li><a href="/api/v1/league-table/Premier%20League">League Tables</a></li>
-<li><a href="/api/v1/global-stats">Global Stats</a></li>
-</ul>
-<h2>Extended Features</h2>
-<ul>
-<li><a href="/api/v1/matches/1/locations">Live Player Locations</a></li>
-<li><a href="/api/v1/season/history">Season History</a></li>
-<li><a href="/api/v1/season/stats">Season Stats</a></li>
-<li><a href="/api/v1/search?q=manchester">Search</a></li>
-<li><a href="/tables">View Tables</a></li>
-</ul>
-<h2>Features</h2>
-<ul>
-<li>90-second realistic matches with 15-second cooldown</li>
-<li>Live player locations and ratings</li>
-<li>Season simulation with historical data (10 seasons)</li>
-<li>Audio-ready commentary with speed controls</li>
-<li>Player characteristics and dynamic stats</li>
-</ul>
+<head>
+    <title>MatchPulse API v{{.Version}}</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f8f9fa;
+            height: 100vh;
+            box-sizing: border-box;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            height: calc(100vh - 40px);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        .header {
+            margin-bottom: 20px;
+        }
+        .content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            overflow: hidden;
+        }
+        .section {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+            overflow-y: auto;
+            max-height: calc(100vh - 200px);
+        }
+        h1, h2 {
+            margin: 0 0 15px 0;
+            color: #212529;
+        }
+        h2 {
+            font-size: 1.2rem;
+            color: #495057;
+        }
+        ul {
+            margin: 0;
+            padding-left: 20px;
+        }
+        li {
+            margin-bottom: 8px;
+            font-size: 0.9rem;
+        }
+        a {
+            color: #007bff;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        .status {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        .status-item {
+            background: #e9ecef;
+            padding: 10px;
+            border-radius: 4px;
+            text-align: center;
+        }
+        .status-value {
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #007bff;
+        }
+        .status-label {
+            font-size: 0.8rem;
+            color: #6c757d;
+        }
+        .endpoint-group {
+            margin-bottom: 15px;
+        }
+        .endpoint-group h3 {
+            margin: 0 0 10px 0;
+            font-size: 1rem;
+            color: #495057;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>MatchPulse API v{{.Version}}</h1>
+            <p>Extended real-time football simulation for state management testing</p>
+            <div class="status">
+                <div class="status-item">
+                    <div class="status-value">{{.ActiveMatches}}</div>
+                    <div class="status-label">Active Matches</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-value">{{.TotalPlayers}}</div>
+                    <div class="status-label">Total Players</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-value">{{.TotalTeams}}</div>
+                    <div class="status-label">Total Teams</div>
+                </div>
+            </div>
+        </div>
+        <div class="content">
+            <div class="section">
+                <h2>Core Endpoints</h2>
+                <div class="endpoint-group">
+                    <h3>Matches</h3>
+                    <ul>
+                        <li><a href="/api/v1/matches">All Matches</a></li>
+                        <li><a href="/api/v1/matches?status=LIVE">Live Matches</a></li>
+                        <li><a href="/api/v1/matches?status=FINISHED">Finished Matches</a></li>
+                        <li><a href="/api/v1/matches?status=HALFTIME">Halftime Matches</a></li>
+                        <li><a href="/api/v1/matches?league=Premier%20League">Premier League Matches</a></li>
+                        <li><a href="/api/v1/matches?league=La%20Liga">La Liga Matches</a></li>
+                    </ul>
+                </div>
+                <div class="endpoint-group">
+                    <h3>Teams & Players</h3>
+                    <ul>
+                        <li><a href="/api/v1/teams">All Teams</a></li>
+                        <li><a href="/api/v1/teams?league=Premier%20League">Premier League Teams</a></li>
+                        <li><a href="/api/v1/teams?league=La%20Liga">La Liga Teams</a></li>
+                        <li><a href="/api/v1/players">All Players</a></li>
+                        <li><a href="/api/v1/players?position=ST">Strikers</a></li>
+                        <li><a href="/api/v1/players?position=GK">Goalkeepers</a></li>
+                    </ul>
+                </div>
+                <div class="endpoint-group">
+                    <h3>League Tables</h3>
+                    <ul>
+                        <li><a href="/api/v1/league-table/Premier%20League">Premier League Table</a></li>
+                        <li><a href="/api/v1/league-table/La%20Liga">La Liga Table</a></li>
+                        <li><a href="/api/v1/league/Premier%20League/form">Premier League Form</a></li>
+                        <li><a href="/api/v1/league/La%20Liga/form">La Liga Form</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="section">
+                <h2>Extended Features</h2>
+                <div class="endpoint-group">
+                    <h3>Match Details</h3>
+                    <ul>
+                        <li><a href="/api/v1/matches/1/stats">Match Statistics</a></li>
+                        <li><a href="/api/v1/matches/1/commentary">Live Commentary</a></li>
+                        <li><a href="/api/v1/matches/1/locations">Player Locations</a></li>
+                    </ul>
+                </div>
+                <div class="endpoint-group">
+                    <h3>Season Information</h3>
+                    <ul>
+                        <li><a href="/api/v1/season/history">Season History</a></li>
+                        <li><a href="/api/v1/season/stats">Season Statistics</a></li>
+                        <li><a href="/api/v1/season/schedule/Premier%20League">Premier League Schedule</a></li>
+                        <li><a href="/api/v1/season/schedule/La%20Liga">La Liga Schedule</a></li>
+                        <li><a href="/api/v1/matchday/1">Matchday Schedule</a></li>
+                    </ul>
+                </div>
+                <div class="endpoint-group">
+                    <h3>Search & Stats</h3>
+                    <ul>
+                        <li><a href="/api/v1/search?q=manchester">Search API</a></li>
+                        <li><a href="/api/v1/global-stats">Global Statistics</a></li>
+                        <li><a href="/api/v1/health">Health Check</a></li>
+                    </ul>
+                </div>
+                <div class="endpoint-group">
+                    <h3>Data Tables</h3>
+                    <ul>
+                        <li><a href="/tables?type=matches">Matches Table</a></li>
+                        <li><a href="/tables?type=teams">Teams Table</a></li>
+                        <li><a href="/tables?type=players">Players Table</a></li>
+                        <li><a href="/tables?type=league-tables">League Tables</a></li>
+                        <li><a href="/tables?type=season-stats">Season Stats</a></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
 </html>`
 
@@ -2164,53 +2340,62 @@ func getMatchdaySchedule(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Update main function to include new routes
 func main() {
-	r := mux.NewRouter()
+	// Create Fuego server
+	s := fuego.NewServer()
 
-	// Apply application middleware
-	r.Use(applicationMiddleware)
+	// Enable CORS middleware using fuego.Use
+	fuego.Use(s, func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "*")
 
-	r.HandleFunc("/tables", getTableData).Methods("GET")
+			if r.Method == "OPTIONS" {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
 
-	// API routes
-	api := r.PathPrefix("/api/v1").Subrouter()
-
-	// Core endpoints (backward compatible)
-	api.HandleFunc("/health", healthCheck).Methods("GET")
-	api.HandleFunc("/matches", getAllMatches).Methods("GET")
-	api.HandleFunc("/matches/{id:[0-9]+}", getMatch).Methods("GET")
-	api.HandleFunc("/matches/{id:[0-9]+}/stats", getMatchStats).Methods("GET")
-	api.HandleFunc("/matches/{id:[0-9]+}/commentary", getMatchCommentary).Methods("GET")
-	api.HandleFunc("/global-stats", getGlobalStats).Methods("GET")
-	api.HandleFunc("/players", getAllPlayers).Methods("GET")
-	api.HandleFunc("/players/{id:[0-9]+}", getPlayer).Methods("GET")
-	api.HandleFunc("/teams", getAllTeams).Methods("GET")
-	api.HandleFunc("/teams/{id:[0-9]+}", getTeam).Methods("GET")
-	api.HandleFunc("/league-table/{league}", getLeagueTable).Methods("GET")
-	api.HandleFunc("/search", searchAPI).Methods("GET")
-
-	// Extended endpoints
-	api.HandleFunc("/matches/{id:[0-9]+}/locations", getMatchLocations).Methods("GET")
-	api.HandleFunc("/season/history", getSeasonHistory).Methods("GET")
-	api.HandleFunc("/season/stats", getSeasonStats).Methods("GET")
-
-	// New season scheduling and form endpoints
-	api.HandleFunc("/season/schedule/{league}", getSeasonSchedule).Methods("GET")
-	api.HandleFunc("/teams/{id:[0-9]+}/form", getTeamForm).Methods("GET")
-	api.HandleFunc("/league/{league}/form", getLeagueForm).Methods("GET")
-	api.HandleFunc("/matchday/{matchday:[0-9]+}", getMatchdaySchedule).Methods("GET")
-
-	r.HandleFunc("/", serveHomepage).Methods("GET")
-
-	c := cors.New(cors.Options{
-		AllowedOrigins: []string{"*"},
-		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders: []string{"*"},
+			next.ServeHTTP(w, r)
+		})
 	})
 
-	handler := c.Handler(r)
+	// Apply application middleware
+	fuego.Use(s, applicationMiddleware)
 
+	// Home page route
+	fuego.GetStd(s, "/", serveHomepage)
+
+	// Tables route
+	fuego.GetStd(s, "/tables", getTableData)
+
+	// API routes group
+	apiGroup := fuego.Group(s, "/api/v1")
+
+	// Core endpoints (backward compatible) - using GetStd for standard http handlers
+	fuego.GetStd(apiGroup, "/health", healthCheck)
+	fuego.GetStd(apiGroup, "/matches", getAllMatches)
+	fuego.GetStd(apiGroup, "/matches/{id}", getMatch)
+	fuego.GetStd(apiGroup, "/matches/{id}/stats", getMatchStats)
+	fuego.GetStd(apiGroup, "/matches/{id}/commentary", getMatchCommentary)
+	fuego.GetStd(apiGroup, "/matches/{id}/locations", getMatchLocations)
+	fuego.GetStd(apiGroup, "/global-stats", getGlobalStats)
+	fuego.GetStd(apiGroup, "/players", getAllPlayers)
+	fuego.GetStd(apiGroup, "/players/{id}", getPlayer)
+	fuego.GetStd(apiGroup, "/teams", getAllTeams)
+	fuego.GetStd(apiGroup, "/teams/{id}", getTeam)
+	fuego.GetStd(apiGroup, "/teams/{id}/form", getTeamForm)
+	fuego.GetStd(apiGroup, "/league-table/{league}", getLeagueTable)
+	fuego.GetStd(apiGroup, "/league/{league}/form", getLeagueForm)
+	fuego.GetStd(apiGroup, "/search", searchAPI)
+
+	// Extended endpoints
+	fuego.GetStd(apiGroup, "/season/history", getSeasonHistory)
+	fuego.GetStd(apiGroup, "/season/stats", getSeasonStats)
+	fuego.GetStd(apiGroup, "/season/schedule/{league}", getSeasonSchedule)
+	fuego.GetStd(apiGroup, "/matchday/{matchday}", getMatchdaySchedule)
+
+	// Get port from environment
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -2221,6 +2406,7 @@ func main() {
 		baseURL = fmt.Sprintf("http://localhost:%s", port)
 	}
 
+	// Print startup information
 	fmt.Printf("🚀 MatchPulse API v%s Extended starting on port %s\n", version, port)
 	fmt.Printf("📊 Documentation: %s\n", baseURL)
 	fmt.Printf("⚽ Live matches: %s/api/v1/matches\n", baseURL)
@@ -2233,7 +2419,8 @@ func main() {
 	fmt.Printf("📋 Matchday schedule: %s/api/v1/matchday/1\n", baseURL)
 	fmt.Printf("\n🎯 Enhanced simulation with proper season scheduling and team form!\n")
 
-	log.Fatal(http.ListenAndServe(":"+port, handler))
+	// Start the server on the specified port
+	s.Run()
 }
 
 // Enhanced match statistics update
