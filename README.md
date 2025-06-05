@@ -11,7 +11,6 @@
 
 Real-world applications face challenges that static APIs can't simulate. MatchPulse provides:
 - **Realistic temporal patterns**: Data updates at different frequencies like real sports APIs
-- **Network condition simulation**: 95% blazing fast, 5% slow/timeout responses  
 - **Complex state relationships**: Player characteristics, match events, season progression
 - **Memory pressure testing**: Live player locations, audio-ready commentary, historical data
 - **Lifecycle management**: Full season cycles with teardown and restart
