@@ -2341,8 +2341,28 @@ func getMatchdaySchedule(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	// Get port from environment
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	baseURL := os.Getenv("BASE_URL")
+	if baseURL == "" {
+		baseURL = fmt.Sprintf("http://localhost:%s", port)
+	}
+
 	// Create Fuego server
-	s := fuego.NewServer()
+	s := fuego.NewServer(
+		fuego.WithAddr("localhost:"+port),
+		fuego.WithEngineOptions(
+			fuego.WithOpenAPIConfig(fuego.OpenAPIConfig{
+				PrettyFormatJSON: true,
+				SwaggerURL:      "/docs",
+				SpecURL:        "/docs/openapi.json",
+			}),
+		),
+	)
 
 	// Enable CORS middleware using fuego.Use
 	fuego.Use(s, func(next http.Handler) http.Handler {
@@ -2395,20 +2415,9 @@ func main() {
 	fuego.GetStd(apiGroup, "/season/schedule/{league}", getSeasonSchedule)
 	fuego.GetStd(apiGroup, "/matchday/{matchday}", getMatchdaySchedule)
 
-	// Get port from environment
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
-
-	baseURL := os.Getenv("BASE_URL")
-	if baseURL == "" {
-		baseURL = fmt.Sprintf("http://localhost:%s", port)
-	}
-
 	// Print startup information
 	fmt.Printf("🚀 MatchPulse API v%s Extended starting on port %s\n", version, port)
-	fmt.Printf("📊 Documentation: %s\n", baseURL)
+	fmt.Printf("📊 Documentation: %s/docs\n", baseURL)
 	fmt.Printf("⚽ Live matches: %s/api/v1/matches\n", baseURL)
 	fmt.Printf("📍 Player locations: %s/api/v1/matches/1/locations\n", baseURL)
 	fmt.Printf("🏆 Season history: %s/api/v1/season/history\n", baseURL)
