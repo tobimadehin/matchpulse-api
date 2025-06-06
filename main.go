@@ -2349,17 +2349,17 @@ func main() {
 
 	baseURL := os.Getenv("BASE_URL")
 	if baseURL == "" {
-		baseURL = fmt.Sprintf("http://localhost:%s", port)
+		baseURL = fmt.Sprintf("http://0.0.0.0:%s", port)
 	}
 
 	// Create Fuego server
 	s := fuego.NewServer(
-		fuego.WithAddr("localhost:"+port),
+		fuego.WithAddr("0.0.0.0:"+port),
 		fuego.WithEngineOptions(
 			fuego.WithOpenAPIConfig(fuego.OpenAPIConfig{
 				PrettyFormatJSON: true,
-				SwaggerURL:      "/docs",
-				SpecURL:        "/docs/openapi.json",
+				SwaggerURL:       "/docs",
+				SpecURL:          "/docs/openapi.json",
 			}),
 		),
 	)
