@@ -238,8 +238,6 @@ MatchPulse is open source software licensed under the [MIT License](LICENSE). Yo
 - Distribute your modifications
 - Include it in proprietary software
 
-The only requirement is including the original license notice.
-
 ## 🙏 Contributors
 
 MatchPulse exists because of contributions from developers worldwide:
