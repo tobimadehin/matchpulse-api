@@ -1,0 +1,54 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches: [ 'main' ]
+  pull_request:
+    branches: [ 'main' ]
+  workflow_dispatch:
+    inputs:
+      app_version:
+        description: 'Application Version (format: X.Y.Z or "latest")'
+        required: true
+        default: 'latest'
+
+jobs:
+  build:
+    name: Build and push docker images
+    runs-on: ubuntu-latest
+    if: (github.event_name == 'pull_request') || 
+        (github.event_name == 'workflow_dispatch') ||
+        (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    outputs:
+      build_tag: ${{ steps.deploy.outputs.build_tag }}
+      version: ${{ steps.deploy.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set environment based on branch
+        id: set-env
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "ENV_TYPE=prd" >> $GITHUB_ENV
+          else
+            echo "ENV_TYPE=dev" >> $GITHUB_ENV
+          fi
+          echo "Selected environment: $ENV_TYPE"
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
+      - name: Permissions
+        run: |
+            chmod +x ./config/deploy-artifact.sh
+
+      - name: Deploy
+        id: deploy
+        run: ./config/deploy-artifact.sh
+        env:
+          CR_PAT: ${{ secrets.CR_PAT }}
+          BUILD_NUMBER: ${{ github.run_number }}
