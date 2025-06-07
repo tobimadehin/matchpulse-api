@@ -3,7 +3,6 @@ set -e
 
 # Read the base version from version.txt
 VERSION=$(cat version.txt | tr -d '[:space:]')
-ENV_TYPE=${ENVIRONMENT}
 REGISTRY=ghcr.io/tobimadehin
 
 echo "✅ Found BASE_VERSION $VERSION from version.txt"
@@ -19,7 +18,7 @@ find_existing_versions() {
   # Look for all versions with this major.minor
   for i in {0..200}; do
     TEST_VERSION="$VERSION.$i"
-    TEST_TAG="$TEST_VERSION-$ENV_TYPE"
+    TEST_TAG="$TEST_VERSION"
     FULL_TAG="$REGISTRY/matchpulse:$TEST_TAG"
     
     # Use docker manifest inspect to check if the tag exists without pulling
@@ -66,7 +65,7 @@ fi
 rm "$TEMP_FILE"
 
 # Set the build tag
-BUILD_TAG="$NEW_VERSION-$ENV_TYPE"
+BUILD_TAG="$NEW_VERSION"
 echo "✨ Using version: $BUILD_TAG"
 
 # Build and push the Docker image

@@ -2,9 +2,9 @@ name: Build and Deploy
 
 on:
   push:
-    branches: [ 'main' ]
+    branches: [ 'master' ]
   pull_request:
-    branches: [ 'main' ]
+    branches: [ 'master' ]
   workflow_dispatch:
     inputs:
       app_version:
@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     if: (github.event_name == 'pull_request') || 
         (github.event_name == 'workflow_dispatch') ||
-        (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        (github.event_name == 'push' && github.ref == 'refs/heads/master')
     outputs:
       build_tag: ${{ steps.deploy.outputs.build_tag }}
       version: ${{ steps.deploy.outputs.version }}
@@ -28,7 +28,7 @@ jobs:
       - name: Set environment based on branch
         id: set-env
         run: |
-          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+          if [[ "${{ github.ref }}" == "refs/heads/master" ]]; then
             echo "ENV_TYPE=prd" >> $GITHUB_ENV
           else
             echo "ENV_TYPE=dev" >> $GITHUB_ENV
@@ -52,12 +52,12 @@ jobs:
         env:
           CR_PAT: ${{ secrets.CR_PAT }}
           BUILD_NUMBER: ${{ github.run_number }}
-          
+
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
     needs: build
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/master'
     steps:
       - name: Create Release
         id: create_release
