@@ -1,14 +1,10 @@
-module github.com/tobimadehin/matchpulse-api
+module matchpulse-api
 
-go 1.24.2
+go 1.23.0
 
-toolchain go1.24.3
+toolchain go1.23.9
 
-require (
-	github.com/go-fuego/fuego v0.18.8
-	github.com/gorilla/mux v1.8.0
-	github.com/rs/cors v1.10.1
-)
+require github.com/gorilla/mux v1.8.1
 
 require (
 	github.com/gabriel-vasile/mimetype v1.4.9 // indirect

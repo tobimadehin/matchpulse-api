@@ -17,7 +17,6 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/go-fuego/fuego"
 	"github.com/gorilla/mux"
 )
 
@@ -1620,7 +1619,7 @@ func healthCheck(w http.ResponseWriter, r *http.Request) {
 	// Prepare detailed health check response
 	healthData := map[string]interface{}{
 		"status":          "healthy",
-		"name":            "MatchPulse API Extended",
+		"name":            "MatchPulse API",
 		"version":         version,
 		"uptime":          uptime.String(),
 		"active_matches":  activeMatches,
@@ -1773,7 +1772,7 @@ func serveHomepage(w http.ResponseWriter, r *http.Request) {
     <div class="container">
         <div class="header">
             <h1>MatchPulse API v{{.Version}}</h1>
-            <p>Extended real-time football simulation for state management testing</p>
+            <p>Real-time football simulation for state management testing</p>
             <div class="status">
                 <div class="status-item">
                     <div class="status-value">{{.ActiveMatches}}</div>
@@ -1825,7 +1824,7 @@ func serveHomepage(w http.ResponseWriter, r *http.Request) {
                 </div>
             </div>
             <div class="section">
-                <h2>Extended Features</h2>
+                <h2>Features</h2>
                 <div class="endpoint-group">
                     <h3>Match Details</h3>
                     <ul>
@@ -2352,20 +2351,11 @@ func main() {
 		baseURL = fmt.Sprintf("http://0.0.0.0:%s", port)
 	}
 
-	// Create Fuego server
-	s := fuego.NewServer(
-		fuego.WithAddr("0.0.0.0:"+port),
-		fuego.WithEngineOptions(
-			fuego.WithOpenAPIConfig(fuego.OpenAPIConfig{
-				PrettyFormatJSON: true,
-				SwaggerURL:       "/docs",
-				SpecURL:          "/docs/openapi.json",
-			}),
-		),
-	)
+	// Create router
+	router := mux.NewRouter()
 
-	// Enable CORS middleware using fuego.Use
-	fuego.Use(s, func(next http.Handler) http.Handler {
+	// Enable CORS middleware
+	router.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
@@ -2381,43 +2371,40 @@ func main() {
 	})
 
 	// Apply application middleware
-	fuego.Use(s, applicationMiddleware)
+	router.Use(applicationMiddleware)
 
 	// Home page route
-	fuego.GetStd(s, "/", serveHomepage)
+	router.HandleFunc("/", serveHomepage).Methods("GET")
 
 	// Tables route
-	fuego.GetStd(s, "/tables", getTableData)
+	router.HandleFunc("/tables", getTableData).Methods("GET")
 
-	// API routes group
-	apiGroup := fuego.Group(s, "/api/v1")
+	// API routes
+	apiRouter := router.PathPrefix("/api/v1").Subrouter()
 
-	// Core endpoints (backward compatible) - using GetStd for standard http handlers
-	fuego.GetStd(apiGroup, "/health", healthCheck)
-	fuego.GetStd(apiGroup, "/matches", getAllMatches)
-	fuego.GetStd(apiGroup, "/matches/{id}", getMatch)
-	fuego.GetStd(apiGroup, "/matches/{id}/stats", getMatchStats)
-	fuego.GetStd(apiGroup, "/matches/{id}/commentary", getMatchCommentary)
-	fuego.GetStd(apiGroup, "/matches/{id}/locations", getMatchLocations)
-	fuego.GetStd(apiGroup, "/global-stats", getGlobalStats)
-	fuego.GetStd(apiGroup, "/players", getAllPlayers)
-	fuego.GetStd(apiGroup, "/players/{id}", getPlayer)
-	fuego.GetStd(apiGroup, "/teams", getAllTeams)
-	fuego.GetStd(apiGroup, "/teams/{id}", getTeam)
-	fuego.GetStd(apiGroup, "/teams/{id}/form", getTeamForm)
-	fuego.GetStd(apiGroup, "/league-table/{league}", getLeagueTable)
-	fuego.GetStd(apiGroup, "/league/{league}/form", getLeagueForm)
-	fuego.GetStd(apiGroup, "/search", searchAPI)
-
-	// Extended endpoints
-	fuego.GetStd(apiGroup, "/season/history", getSeasonHistory)
-	fuego.GetStd(apiGroup, "/season/stats", getSeasonStats)
-	fuego.GetStd(apiGroup, "/season/schedule/{league}", getSeasonSchedule)
-	fuego.GetStd(apiGroup, "/matchday/{matchday}", getMatchdaySchedule)
+	// Core endpoints
+	apiRouter.HandleFunc("/health", healthCheck).Methods("GET")
+	apiRouter.HandleFunc("/matches", getAllMatches).Methods("GET")
+	apiRouter.HandleFunc("/matches/{id}", getMatch).Methods("GET")
+	apiRouter.HandleFunc("/matches/{id}/stats", getMatchStats).Methods("GET")
+	apiRouter.HandleFunc("/matches/{id}/commentary", getMatchCommentary).Methods("GET")
+	apiRouter.HandleFunc("/matches/{id}/locations", getMatchLocations).Methods("GET")
+	apiRouter.HandleFunc("/global-stats", getGlobalStats).Methods("GET")
+	apiRouter.HandleFunc("/players", getAllPlayers).Methods("GET")
+	apiRouter.HandleFunc("/players/{id}", getPlayer).Methods("GET")
+	apiRouter.HandleFunc("/teams", getAllTeams).Methods("GET")
+	apiRouter.HandleFunc("/teams/{id}", getTeam).Methods("GET")
+	apiRouter.HandleFunc("/teams/{id}/form", getTeamForm).Methods("GET")
+	apiRouter.HandleFunc("/league-table/{league}", getLeagueTable).Methods("GET")
+	apiRouter.HandleFunc("/league/{league}/form", getLeagueForm).Methods("GET")
+	apiRouter.HandleFunc("/search", searchAPI).Methods("GET")
+	apiRouter.HandleFunc("/season/history", getSeasonHistory).Methods("GET")
+	apiRouter.HandleFunc("/season/stats", getSeasonStats).Methods("GET")
+	apiRouter.HandleFunc("/season/schedule/{league}", getSeasonSchedule).Methods("GET")
+	apiRouter.HandleFunc("/matchday/{matchday}", getMatchdaySchedule).Methods("GET")
 
 	// Print startup information
-	fmt.Printf("🚀 MatchPulse API v%s Extended starting on port %s\n", version, port)
-	fmt.Printf("📊 Documentation: %s/docs\n", baseURL)
+	fmt.Printf("🚀 MatchPulse API v%s starting on port %s\n", version, port)
 	fmt.Printf("⚽ Live matches: %s/api/v1/matches\n", baseURL)
 	fmt.Printf("📍 Player locations: %s/api/v1/matches/1/locations\n", baseURL)
 	fmt.Printf("🏆 Season history: %s/api/v1/season/history\n", baseURL)
@@ -2425,11 +2412,9 @@ func main() {
 	fmt.Printf("📅 Season schedule: %s/api/v1/season/schedule/Premier%%20League\n", baseURL)
 	fmt.Printf("📊 Team form: %s/api/v1/teams/1/form\n", baseURL)
 	fmt.Printf("🏅 League form table: %s/api/v1/league/Premier%%20League/form\n", baseURL)
-	fmt.Printf("📋 Matchday schedule: %s/api/v1/matchday/1\n", baseURL)
-	fmt.Printf("\n🎯 Enhanced simulation with proper season scheduling and team form!\n")
 
-	// Start the server on the specified port
-	s.Run()
+	// Start server
+	log.Fatal(http.ListenAndServe("0.0.0.0:"+port, router))
 }
 
 // Enhanced match statistics update

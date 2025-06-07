@@ -36,7 +36,7 @@ go mod download
 # Start the server
 go run main.go
 
-# Visit http://localhost:8080 for interactive documentation
+# 🚀 Your matchpulse server is available on http://localhost:8080 
 ```
 
 The API starts generating realistic match data immediately with:
@@ -142,6 +142,8 @@ Commentary system designed for streaming audio integration:
 | `GET /api/v1/season/history` | Last 10 seasons data | Season completion | Historical analysis |
 | `GET /api/v1/season/stats` | Current season progress | Match completion | Progress tracking |
 | `GET /api/v1/league-table/{league}` | Real-time standings | Match completion | League standings |
+
+Complete API reference available on https://matchpulse-api.onrender.com/docs
 
 ## 🎮 How It Works - Complete Lifecycle
 
