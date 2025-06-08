@@ -2397,6 +2397,14 @@ func serveHomepage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// If no live match found, find the first match in the map
+	if firstLiveMatchID == 0 && len(matches) > 0 {
+		for id := range matches {
+			firstLiveMatchID = id
+			break
+		}
+	}
+
 	templateData := struct {
 		ActiveMatches    int
 		TotalPlayers     int
