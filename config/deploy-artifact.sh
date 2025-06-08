@@ -78,6 +78,15 @@ docker tag matchpulse $REGISTRY/matchpulse:$BUILD_TAG
 echo "🚀 Pushing Docker image to registry..."
 docker push $REGISTRY/matchpulse:$BUILD_TAG
 
+# Tag and push latest if TAG_LATEST is true
+if [ "$TAG_LATEST" = "true" ]; then
+  echo "🏷️ Tagging Docker image as latest..."
+  docker tag matchpulse $REGISTRY/matchpulse:latest
+  echo "🚀 Pushing latest tag to registry..."
+  docker push $REGISTRY/matchpulse:latest
+  echo "✅ Latest tag pushed successfully"
+fi
+
 echo "✅ Done! Image pushed successfully: $REGISTRY/matchpulse:$BUILD_TAG"
 
 # Export the version for use in subsequent scripts or steps

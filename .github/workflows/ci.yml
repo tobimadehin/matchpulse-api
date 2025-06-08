@@ -52,6 +52,7 @@ jobs:
         env:
           CR_PAT: ${{ secrets.CR_PAT }}
           BUILD_NUMBER: ${{ github.run_number }}
+          TAG_LATEST: "true"
 
   release:
     name: Create GitHub Release
