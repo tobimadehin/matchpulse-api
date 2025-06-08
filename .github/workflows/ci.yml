@@ -63,12 +63,10 @@ jobs:
     steps:
       - name: Create Release
         id: create_release
-        uses: actions/create-release@v1
+        uses: elgohr/Github-Release-Action@v5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ needs.build.outputs.version }}
-          release_name: "Release ${{ needs.build.outputs.version }}"
-          body: |
-            Docker Build Tag: ${{ needs.build.outputs.build_tag }}
-            This release was generated automatically.
+          tag: ${{ needs.build.outputs.version }}
+          title: "Matchpulse Version ${{ needs.build.outputs.version }}"
+          prerelease: true
