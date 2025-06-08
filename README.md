@@ -106,7 +106,7 @@ Each player has permanent characteristics that affect match performance:
 ### 🏆 Season Management
 Complete season lifecycle with historical tracking:
 
-- **38 matches per season** with realistic scheduling
+- **18 matches per season** with realistic scheduling
 - **Automatic season progression** and table updates
 - **Historical data** for last 10 seasons including:
   - Top scorer, top assists, most fouls

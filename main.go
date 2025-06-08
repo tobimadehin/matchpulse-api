@@ -2609,10 +2609,10 @@ func serveHomepage(w http.ResponseWriter, r *http.Request) {
                 <div class="endpoint-group">
                     <h3>League Tables</h3>
                     <ul>
-                        <li><a href="/api/v1/leagues/Premier%20League/table">Premier League Table</a></li>
-                        <li><a href="/api/v1/leagues/La%20Liga/table">Community League Table</a></li>
+                        <li><a href="/api/v1/leagues/Premier%20League/table" class="league-link">Premier League</a></li>
+                        <li><a href="/api/v1/leagues/Community%20League/table" class="league-link">Community League</a></li>
                         <li><a href="/api/v1/leagues/Premier%20League/form">Premier League Form</a></li>
-                        <li><a href="/api/v1/leagues/La%20Liga/form">Community League Form</a></li>
+                        <li><a href="/api/v1/leagues/Community%20League/form">Community League Form</a></li>
                         <li><a href="/api/v1/leagues/Premier%20League/schedule">Premier League Schedule</a></li>
                     </ul>
                 </div>
