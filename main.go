@@ -1933,14 +1933,21 @@ func getMatchLocations(w http.ResponseWriter, r *http.Request) {
 	}
 
 	mutex.RLock()
+	match := matches[id]
+	if match == nil {
+		mutex.RUnlock()
+		http.Error(w, "Match not found", http.StatusNotFound)
+		return
+	}
+
 	locations, exists := playerLocations[id]
 	if !exists {
 		locations = make(map[int]*PlayerLocation)
 	}
 
 	// Get only the first 11 players from each team
-	homeTeamID := matches[id].HomeTeam.ID
-	awayTeamID := matches[id].AwayTeam.ID
+	homeTeamID := match.HomeTeam.ID
+	awayTeamID := match.AwayTeam.ID
 
 	homeCount := 0
 	awayCount := 0
