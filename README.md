@@ -128,22 +128,27 @@ Commentary system designed for streaming audio integration:
 
 ## 🔧 API Reference
 
-### Core Endpoints
+### Example Endpoints
 
 | Endpoint | Purpose | Update Frequency | Best For Testing |
 |----------|---------|------------------|------------------|
 | `GET /api/v1/matches` | All live matches | 20-30 seconds | Basic state management |
 | `GET /api/v1/matches/{id}/stats` | Live match statistics | 5-8 seconds | High-frequency updates |
-| `GET /api/v1/global-stats` | Aggregate data | 12 seconds | Derived state |
+| `GET /api/v1/stats` | Global statistics | 12 seconds | Derived state |
 | `GET /api/v1/players` | Player data with characteristics | Static | Player database |
 | `GET /api/v1/teams` | Team information | Static | Team database |
-| `GET /api/v1/matches/{id}/locations` | Live player positions | 2 seconds | Real-time visualizations |
+| `GET /api/v1/matches/{id}/players` | Live player positions | 2 seconds | Real-time visualizations |
 | `GET /api/v1/matches/{id}/commentary` | Audio-ready commentary | Event-driven | Streaming features |
-| `GET /api/v1/season/history` | Last 10 seasons data | Season completion | Historical analysis |
-| `GET /api/v1/season/stats` | Current season progress | Match completion | Progress tracking |
-| `GET /api/v1/league-table/{league}` | Real-time standings | Match completion | League standings |
+| `GET /api/v1/seasons/history` | Last 10 seasons data | Season completion | Historical analysis |
+| `GET /api/v1/seasons/current` | Current season progress | Match completion | Progress tracking |
+| `GET /api/v1/leagues/{league}/table` | Real-time standings | Match completion | League standings |
+| `GET /api/v1/matches/{id}/momentum` | Team momentum tracking | 5-8 seconds | Momentum analysis |
+| `GET /api/v1/matches/{id}/probabilities` | Win probabilities | 5-8 seconds | Betting features |
+| `GET /api/v1/matches/{id}/availability` | Player availability | Event-driven | Team management |
+| `GET /api/v1/health` | API health status | 30 seconds | System monitoring |
+| `GET /api/v1/search` | Global search | On-demand | Search functionality |
 
-Complete API reference available on https://matchpulse-api.onrender.com/docs
+Complete API reference available on https://matchpulse-api.onrender.com/api-schema.txt
 
 ## 🎮 How It Works - Complete Lifecycle
 
@@ -167,12 +172,6 @@ Complete API reference available on https://matchpulse-api.onrender.com/docs
     └── Create next match
 ```
 
-### Season Management
-```
-📅 Season (38 matches) → Track Statistics → End Season → Crown Champions → Reset & Start New Season
-```
-
-This helps you build resilient applications that handle real-world network conditions.
 
 ## 🏗️ Contributing
 

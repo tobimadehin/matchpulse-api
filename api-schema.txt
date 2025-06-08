@@ -1,0 +1,669 @@
+# MatchPulse API Schema v1.2.0
+
+## Base URL
+```
+https://your-domain.com/api/v1
+```
+
+## Authentication
+No authentication required - public API
+
+---
+
+## SYSTEM ENDPOINTS
+
+### Health Check
+- **GET** `/health`
+- **Description**: Check API health status
+- **Response**: 
+```json
+{
+  "status": "healthy",
+  "version": "1.2.0",
+  "uptime": "2h30m15s",
+  "goroutines": 42,
+  "memory": "45.2 MB",
+  "cpu_usage": "12.5%",
+  "timestamp": "2024-01-15T14:30:00Z"
+}
+```
+
+### Global Statistics
+- **GET** `/stats`
+- **Description**: Get global football simulation statistics
+- **Response**:
+```json
+{
+  "total_matches": 156,
+  "total_goals": 423,
+  "average_goals": 2.71,
+  "most_goals_match_id": 45,
+  "active_viewers": 1247,
+  "top_scorer": {
+    "id": 123,
+    "name": "Marcus Johnson 1",
+    "goals": 18
+  },
+  "current_season": 1,
+  "current_matchweek": 15,
+  "season_progress": 0.65,
+  "last_update": "2024-01-15T14:30:00Z"
+}
+```
+
+### Search
+- **GET** `/search?q={query}&type={type}&limit={limit}`
+- **Parameters**:
+  - `q` (required): Search query string
+  - `type` (optional): Filter by type (players, teams, matches)
+  - `limit` (optional): Limit results (default: 10, max: 50)
+- **Response**:
+```json
+{
+  "query": "Johnson",
+  "total": 5,
+  "results": [
+    {
+      "type": "player",
+      "id": 123,
+      "name": "Marcus Johnson 1",
+      "team": "Capricon FC",
+      "position": "GK"
+    }
+  ]
+}
+```
+
+---
+
+## MATCH ENDPOINTS
+
+### Get All Matches
+- **GET** `/matches?status={status}&league={league}&page={page}&limit={limit}`
+- **Parameters**:
+  - `status` (optional): Filter by status (live, finished, scheduled)
+  - `league` (optional): Filter by league name
+  - `page` (optional): Page number (default: 1)
+  - `limit` (optional): Items per page (default: 10, max: 50)
+- **Response**:
+```json
+{
+  "matches": [
+    {
+      "id": 1,
+      "home_team": {
+        "id": 1,
+        "name": "Capricon FC",
+        "short_name": "CAP",
+        "logo_url": "https://...",
+        "form": ["W", "L", "W"],
+        "form_points": 9
+      },
+      "away_team": {
+        "id": 2,
+        "name": "The Galacticons",
+        "short_name": "GAL"
+      },
+      "home_score": 2,
+      "away_score": 1,
+      "minute": 67,
+      "status": "live",
+      "competition": "Premier League",
+      "venue": "Stellar Stadium",
+      "attendance": 45000,
+      "weather": "Clear",
+      "temperature": 18,
+      "start_time": "2024-01-15T14:00:00Z",
+      "season": 1,
+      "matchweek": 15
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 10,
+    "total": 156,
+    "pages": 16
+  }
+}
+```
+
+### Get Single Match
+- **GET** `/matches/{id}`
+- **Parameters**:
+  - `id` (required): Match ID (integer)
+- **Response**: Single match object (same as above) with additional details
+
+### Get Match Statistics
+- **GET** `/matches/{id}/stats`
+- **Response**:
+```json
+{
+  "match_id": 1,
+  "home_possession": 58,
+  "away_possession": 42,
+  "home_shots": 12,
+  "away_shots": 8,
+  "home_shots_on_target": 6,
+  "away_shots_on_target": 3,
+  "home_corners": 7,
+  "away_corners": 3,
+  "home_fouls": 11,
+  "away_fouls": 14,
+  "home_yellow_cards": 2,
+  "away_yellow_cards": 3,
+  "home_red_cards": 0,
+  "away_red_cards": 1,
+  "home_passes": 456,
+  "away_passes": 332,
+  "home_pass_accuracy": 87.5,
+  "away_pass_accuracy": 82.1,
+  "last_update": "2024-01-15T14:30:00Z"
+}
+```
+
+### Get Match Commentary
+- **GET** `/matches/{id}/commentary?limit={limit}&since={timestamp}`
+- **Parameters**:
+  - `limit` (optional): Number of entries (default: 50, max: 100)
+  - `since` (optional): Get commentary since timestamp
+- **Response**:
+```json
+{
+  "match_id": 1,
+  "commentary": [
+    {
+      "id": 1001,
+      "minute": 67,
+      "text": "GOAL! Marcus Johnson 1 scores for Capricon FC!",
+      "event_type": "goal",
+      "player": {
+        "id": 123,
+        "name": "Marcus Johnson 1",
+        "position": "ST",
+        "team_id": 1
+      },
+      "timestamp": "2024-01-15T14:30:00Z",
+      "audio_text": "GOOOAL! What a strike!",
+      "audio_speed": 1.2
+    }
+  ],
+  "total": 45
+}
+```
+
+### Get Match Player Locations
+- **GET** `/matches/{id}/players?team={team_id}`
+- **Parameters**:
+  - `team` (optional): Filter by team ID
+- **Response**:
+```json
+{
+  "match_id": 1,
+  "players": [
+    {
+      "player_id": 123,
+      "player_name": "Marcus Johnson 1",
+      "team_id": 1,
+      "position": "GK",
+      "x": 45.2,
+      "y": 30.1,
+      "timestamp": "2024-01-15T14:30:00Z"
+    }
+  ],
+  "ball_position": {
+    "x": 67.5,
+    "y": 32.0,
+    "possessor_id": 124,
+    "speed": 8.5,
+    "direction": 45.0,
+    "event_type": "play"
+  }
+}
+```
+
+### Get Match Momentum
+- **GET** `/matches/{id}/momentum`
+- **Response**:
+```json
+{
+  "match_id": 1,
+  "momentum": {
+    "home_momentum": 0.3,
+    "away_momentum": -0.2,
+    "last_goal_time": 67,
+    "last_goal_team": 1,
+    "last_red_card_time": 0,
+    "last_red_card_team": 0,
+    "consecutive_goals": 1,
+    "pressure_index": 0.7,
+    "formation_adjustments": 0,
+    "last_update": "2024-01-15T14:30:00Z"
+  },
+  "timestamp": "2024-01-15T14:30:00Z"
+}
+```
+
+### Get Match Probabilities
+- **GET** `/matches/{id}/probabilities`
+- **Response**:
+```json
+{
+  "match_id": 1,
+  "probabilities": {
+    "home_win_prob": 0.65,
+    "draw_prob": 0.20,
+    "away_win_prob": 0.15,
+    "next_goal_prob": 0.08,
+    "home_next_goal_prob": 0.05,
+    "away_next_goal_prob": 0.03,
+    "factors": {
+      "score_diff": 0.1,
+      "player_diff": 0.15,
+      "momentum": 0.06,
+      "time_multiplier": 0.8
+    },
+    "last_update": "2024-01-15T14:30:00Z"
+  },
+  "timestamp": "2024-01-15T14:30:00Z"
+}
+```
+
+### Get Match Player Availability
+- **GET** `/matches/{id}/availability`
+- **Response**:
+```json
+{
+  "match_id": 1,
+  "available_count": 20,
+  "unavailable_count": 2,
+  "home_player_count": 11,
+  "away_player_count": 10,
+  "unavailable_players": [
+    {
+      "player": {
+        "id": 145,
+        "name": "Diego Martinez 8",
+        "position": "CB",
+        "team_id": 2
+      },
+      "status": "red_card",
+      "unavailable_from": 45,
+      "reason": "Direct red card"
+    }
+  ],
+  "timestamp": "2024-01-15T14:30:00Z"
+}
+```
+
+---
+
+## PLAYER ENDPOINTS
+
+### Get All Players
+- **GET** `/players?team={team_id}&position={position}&page={page}&limit={limit}`
+- **Parameters**:
+  - `team` (optional): Filter by team ID
+  - `position` (optional): Filter by position (GK, CB, LB, RB, CDM, CM, CAM, LW, RW, ST)
+  - `page` (optional): Page number (default: 1)
+  - `limit` (optional): Items per page (default: 10, max: 50)
+- **Response**:
+```json
+{
+  "players": [
+    {
+      "id": 123,
+      "name": "Marcus Johnson 1",
+      "position": "GK",
+      "number": 1,
+      "age": 28,
+      "nationality": "England",
+      "avatar_url": "https://i.pravatar.cc/150?img=1",
+      "team_id": 1,
+      "goals": 0,
+      "assists": 2,
+      "yellow_cards": 1,
+      "red_cards": 0,
+      "appearances": 15,
+      "market_value": 2500000,
+      "characteristics": {
+        "speed": 65,
+        "shooting": 45,
+        "passing": 70,
+        "defending": 85,
+        "physicality": 80,
+        "mentality": 75,
+        "overall": 70
+      },
+      "season_stats": {
+        "matches_played": 15,
+        "minutes_played": 1350,
+        "goals_this_season": 0,
+        "assists_this_season": 2,
+        "average_rating": 7.2
+      },
+      "current_rating": 7.5
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 10,
+    "total": 360,
+    "pages": 36
+  }
+}
+```
+
+### Get Single Player
+- **GET** `/players/{id}`
+- **Response**: Single player object (same as above) with additional details
+
+---
+
+## TEAM ENDPOINTS
+
+### Get All Teams
+- **GET** `/teams?league={league}&page={page}&limit={limit}`
+- **Parameters**:
+  - `league` (optional): Filter by league
+  - `page` (optional): Page number (default: 1)
+  - `limit` (optional): Items per page (default: 10, max: 50)
+- **Response**:
+```json
+{
+  "teams": [
+    {
+      "id": 1,
+      "name": "Capricon FC",
+      "short_name": "CAP",
+      "logo_url": "https://ui-avatars.com/api/?name=CAP",
+      "stadium": "Stellar Stadium",
+      "founded": 2180,
+      "manager": "Viktor Cosmos",
+      "league": "Premier League",
+      "form": ["W", "L", "W", "W", "D"],
+      "form_points": 10,
+      "home_streak": 3,
+      "away_streak": -1
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 10,
+    "total": 20,
+    "pages": 2
+  }
+}
+```
+
+### Get Single Team
+- **GET** `/teams/{id}`
+- **Response**: Single team object with squad details
+
+### Get Team Form
+- **GET** `/teams/{id}/form`
+- **Response**:
+```json
+{
+  "team_id": 1,
+  "team_name": "Capricon FC",
+  "form": ["W", "L", "W", "W", "D"],
+  "form_points": 10,
+  "home_streak": 3,
+  "away_streak": -1,
+  "last_5_matches": [
+    {
+      "opponent": "The Galacticons",
+      "result": "W",
+      "score": "2-1",
+      "date": "2024-01-15T14:00:00Z"
+    }
+  ]
+}
+```
+
+---
+
+## LEAGUE ENDPOINTS
+
+### Get League Table
+- **GET** `/leagues/{league}/table?page={page}&limit={limit}`
+- **Parameters**:
+  - `league` (required): League name (Premier League, La Liga)
+  - `page` (optional): Page number (default: 1)
+  - `limit` (optional): Items per page (default: 20, max: 50)
+- **Response**:
+```json
+{
+  "league": "Premier League",
+  "table": [
+    {
+      "position": 1,
+      "team": {
+        "id": 1,
+        "name": "Capricon FC",
+        "short_name": "CAP"
+      },
+      "played": 15,
+      "won": 10,
+      "drawn": 3,
+      "lost": 2,
+      "goals_for": 28,
+      "goals_against": 12,
+      "goal_difference": 16,
+      "points": 33,
+      "form": ["W", "W", "D", "W", "L"]
+    }
+  ],
+  "last_update": "2024-01-15T14:30:00Z"
+}
+```
+
+### Get League Form Table
+- **GET** `/leagues/{league}/form`
+- **Response**:
+```json
+{
+  "league": "Premier League",
+  "form_table": [
+    {
+      "position": 1,
+      "team": {
+        "id": 1,
+        "name": "Capricon FC"
+      },
+      "form": ["W", "W", "D", "W", "L"],
+      "form_points": 10
+    }
+  ],
+  "count": 10
+}
+```
+
+### Get League Schedule
+- **GET** `/leagues/{league}/schedule?matchday={matchday}`
+- **Parameters**:
+  - `matchday` (optional): Filter by specific matchday
+- **Response**:
+```json
+{
+  "league": "Premier League",
+  "schedule": [
+    {
+      "matchday": 15,
+      "home_team": {
+        "id": 1,
+        "name": "Capricon FC"
+      },
+      "away_team": {
+        "id": 2,
+        "name": "The Galacticons"
+      },
+      "is_played": true,
+      "match_id": 1,
+      "scheduled_at": "2024-01-15T14:00:00Z"
+    }
+  ]
+}
+```
+
+---
+
+## SEASON ENDPOINTS
+
+### Get Current Season Stats
+- **GET** `/seasons/current`
+- **Response**:
+```json
+{
+  "season": 1,
+  "current_matchweek": 15,
+  "season_progress": 0.65,
+  "total_matches": 156,
+  "total_goals": 423,
+  "average_goals": 2.71,
+  "top_scorer": {
+    "id": 123,
+    "name": "Marcus Johnson 1",
+    "goals": 18
+  },
+  "top_assists": {
+    "id": 124,
+    "name": "Oliver Brown 20",
+    "assists": 12
+  },
+  "most_fouls": {
+    "id": 125,
+    "name": "Diego Martinez 8",
+    "fouls": 45
+  }
+}
+```
+
+### Get Season History
+- **GET** `/seasons/history?limit={limit}`
+- **Parameters**:
+  - `limit` (optional): Number of seasons (default: 10, max: 50)
+- **Response**:
+```json
+{
+  "seasons": [
+    {
+      "season": 1,
+      "winners": {
+        "premier_league_winner": {
+          "id": 1,
+          "name": "Capricon FC"
+        },
+        "community_league_winner": {
+          "id": 11,
+          "name": "Nova Dynamics"
+        }
+      },
+      "top_scorer": {
+        "id": 123,
+        "name": "Marcus Johnson 1",
+        "goals": 32
+      },
+      "player_of_season": {
+        "id": 123,
+        "name": "Marcus Johnson 1"
+      },
+      "total_goals": 856,
+      "total_matches": 380,
+      "end_date": "2024-05-15T00:00:00Z"
+    }
+  ]
+}
+```
+
+### Get Matchday Schedule
+- **GET** `/seasons/current/matchdays/{matchday}`
+- **Parameters**:
+  - `matchday` (required): Matchday number (1-38)
+- **Response**:
+```json
+{
+  "matchday": 15,
+  "matches": [
+    {
+      "match_id": 1,
+      "league": "Premier League",
+      "home_team": {
+        "id": 1,
+        "name": "Capricon FC"
+      },
+      "away_team": {
+        "id": 2,
+        "name": "The Galacticons"
+      },
+      "scheduled_at": "2024-01-15T14:00:00Z",
+      "status": "live"
+    }
+  ]
+}
+```
+
+---
+
+## ERROR RESPONSES
+
+All endpoints may return these standard error responses:
+
+### 400 Bad Request
+```json
+{
+  "error": "Invalid parameters",
+  "message": "Match ID must be a positive integer",
+  "timestamp": "2024-01-15T14:30:00Z"
+}
+```
+
+### 404 Not Found
+```json
+{
+  "error": "Resource not found",
+  "message": "Match with ID 999 not found",
+  "timestamp": "2024-01-15T14:30:00Z"
+}
+```
+
+### 500 Internal Server Error
+```json
+{
+  "error": "Internal server error",
+  "message": "An unexpected error occurred",
+  "timestamp": "2024-01-15T14:30:00Z"
+}
+```
+
+---
+
+## NOTES FOR FRONTEND DEVELOPERS
+
+1. **Base URL**: All endpoints are prefixed with `/api/v1`
+2. **Content Type**: All responses are `application/json`
+3. **CORS**: Enabled for all origins
+4. **Rate Limiting**: None currently implemented
+5. **Caching**: Consider caching match data that updates frequently
+6. **WebSocket**: Not implemented - use polling for real-time updates
+7. **Pagination**: Uses standard `page` and `limit` parameters
+8. **Date Format**: All timestamps in ISO 8601 format (UTC)
+9. **IDs**: All IDs are positive integers
+10. **League Names**: Use URL encoding for spaces (e.g., "Premier%20League")
+
+## REAL-TIME FEATURES
+
+For live match tracking, poll these endpoints every 5-10 seconds:
+- `/api/v1/matches/{id}` - Match status and score
+- `/api/v1/matches/{id}/momentum` - Team momentum
+- `/api/v1/matches/{id}/probabilities` - Win probabilities
+- `/api/v1/matches/{id}/commentary?since={last_timestamp}` - New commentary
+- `/api/v1/matches/{id}/players` - Player positions (optional)
+
+## PERFORMANCE TIPS
+
+1. Use pagination for large datasets
+2. Cache static data (teams, players, season history)
+3. Poll only active matches for real-time updates
+4. Use `since` parameter for commentary to get only new entries
+5. Consider implementing client-side caching with timestamps 

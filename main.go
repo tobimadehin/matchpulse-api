@@ -31,13 +31,13 @@ const (
 	StatusBreak     = "BREAK"
 
 	// Leagues
-	LeaguePremier = "Premier League"
-	LeagueLaLiga  = "La Liga"
+	LeaguePremier         = "Premier League"
+	LeagueCommunityLeague = "Community League"
 
 	// League configuration
-	TeamsPerLeague   = 20 // Each league has 20 teams
-	MatchesPerTeam   = 38 // Each team plays 38 matches (19 home, 19 away)
+	TeamsPerLeague   = 10 // Each league has 10 teams
 	MatchdaysPerWeek = 2  // 2 matchdays per week
+	MatchesPerTeam   = 18 // Each team plays 38 matches (9 home, 9 away)
 
 	// Positions
 	PosGK  = "GK"
@@ -65,6 +65,18 @@ const (
 	EventFoul         = "FOUL"
 	EventCorner       = "CORNER"
 	EventOffside      = "OFFSIDE"
+	EventThrowIn      = "THROW_IN"
+	EventPenalty      = "PENALTY"
+	EventFreekick     = "FREEKICK"
+
+	// Ball event states
+	BallEventPlay     = "PLAY"
+	BallEventKickoff  = "KICKOFF"
+	BallEventFreekick = "FREEKICK"
+	BallEventCorner   = "CORNER"
+	BallEventThrowIn  = "THROW_IN"
+	BallEventPenalty  = "PENALTY"
+	BallEventGoalkick = "GOAL_KICK"
 
 	// Formations
 	Formation442  = "4-4-2"
@@ -80,6 +92,20 @@ const (
 	WeatherOvercast     = "Overcast"
 	WeatherSunny        = "Sunny"
 	WeatherPartlyCloudy = "Partly Cloudy"
+
+	// Offensive tactics
+	TacticTikiTaka      = "TIKI_TAKA"
+	TacticCounterAttack = "COUNTER_ATTACK"
+	TacticDirectPlay    = "DIRECT_PLAY"
+	TacticWingPlay      = "WING_PLAY"
+	TacticPressing      = "HIGH_PRESSING"
+
+	// Defensive tactics
+	TacticCompactDefense = "COMPACT_DEFENSE"
+	TacticManMarking     = "MAN_MARKING"
+	TacticZonalMarking   = "ZONAL_MARKING"
+	TacticOffside        = "OFFSIDE_TRAP"
+	TacticLowBlock       = "LOW_BLOCK"
 
 	// Form results
 	FormWin  = "W"
@@ -103,8 +129,48 @@ const (
 var (
 	formations        = []string{Formation442, Formation433, Formation352, Formation4231, Formation532}
 	weatherConditions = []string{WeatherClear, WeatherCloudy, WeatherLightRain, WeatherOvercast, WeatherSunny, WeatherPartlyCloudy}
-	formResults       = []string{FormWin, FormLoss, FormDraw}
+
+	// Player availability statuses
+	PlayerAvailable   = "available"
+	PlayerRedCard     = "red_card"
+	PlayerInjured     = "injured"
+	PlayerSubstituted = "substituted"
 )
+
+// Match momentum and dynamics
+type MatchMomentum struct {
+	HomeTeamMomentum     float64   `json:"home_momentum"` // -1.0 to 1.0
+	AwayTeamMomentum     float64   `json:"away_momentum"` // -1.0 to 1.0
+	LastGoalTime         int       `json:"last_goal_time"`
+	LastGoalTeam         int       `json:"last_goal_team"`
+	LastRedCardTime      int       `json:"last_red_card_time"`
+	LastRedCardTeam      int       `json:"last_red_card_team"`
+	ConsecutiveGoals     int       `json:"consecutive_goals"`
+	LastUpdateTime       time.Time `json:"last_update"`
+	PressureIndex        float64   `json:"pressure_index"` // 0.0 to 1.0
+	FormationAdjustments int       `json:"formation_adjustments"`
+}
+
+// Player availability during matches
+type PlayerAvailability struct {
+	PlayerID        int    `json:"player_id"`
+	Status          string `json:"status"`           // available, red_card, injured, substituted
+	UnavailableFrom int    `json:"unavailable_from"` // minute when became unavailable
+	Reason          string `json:"reason"`
+}
+
+// Dynamic match probabilities that change during the game
+type DynamicMatchProbabilities struct {
+	MatchID             int                `json:"match_id"`
+	HomeWinProbability  float64            `json:"home_win_prob"`
+	DrawProbability     float64            `json:"draw_prob"`
+	AwayWinProbability  float64            `json:"away_win_prob"`
+	NextGoalProbability float64            `json:"next_goal_prob"`
+	HomeNextGoalProb    float64            `json:"home_next_goal_prob"`
+	AwayNextGoalProb    float64            `json:"away_next_goal_prob"`
+	LastUpdate          time.Time          `json:"last_update"`
+	Factors             map[string]float64 `json:"factors"` // What's influencing the probabilities
+}
 
 // New structures for enhanced features
 type NewsEntry struct {
@@ -164,8 +230,6 @@ type TeamInfo struct {
 	League     string   `json:"league"`
 	Form       []string `json:"form"`        // Last 5 results (W/D/L)
 	FormPoints int      `json:"form_points"` // Points from last 5 matches
-	HomeStreak int      `json:"home_streak"` // Consecutive home wins/losses
-	AwayStreak int      `json:"away_streak"` // Consecutive away wins/losses
 }
 
 type Player struct {
@@ -215,6 +279,35 @@ type PlayerLocation struct {
 	X         float64   `json:"x"` // 0-100 (field width percentage)
 	Y         float64   `json:"y"` // 0-64 (field height percentage)
 	Timestamp time.Time `json:"timestamp"`
+}
+
+type BallPosition struct {
+	X            float64   `json:"x"`
+	Y            float64   `json:"y"`
+	PossessorID  int       `json:"possessor_id"`  // Player ID who has the ball
+	LastTouchID  int       `json:"last_touch_id"` // Previous possessor (for assists)
+	Speed        float64   `json:"speed"`
+	Direction    float64   `json:"direction"`
+	Timestamp    time.Time `json:"timestamp"`
+	EventType    string    `json:"event_type"`    // Current ball event (PLAY, FREEKICK, CORNER, etc.)
+	EventStarted time.Time `json:"event_started"` // When current event started
+}
+
+var (
+	ballPositions = make(map[int]*BallPosition) // matchID -> ball position
+	matchTactics  = make(map[int]*MatchTactics) // matchID -> tactics
+)
+
+type MatchTactics struct {
+	HomeOffensive string `json:"home_offensive"`
+	HomeDefensive string `json:"home_defensive"`
+	AwayOffensive string `json:"away_offensive"`
+	AwayDefensive string `json:"away_defensive"`
+}
+
+type FormationPosition struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
 }
 
 type MatchStats struct {
@@ -283,8 +376,8 @@ type GlobalStats struct {
 }
 
 type SeasonWinners struct {
-	PremierLeagueWinner *TeamInfo `json:"premier_league_winner"`
-	LaLigaWinner        *TeamInfo `json:"la_liga_winner"`
+	PremierLeagueWinner   *TeamInfo `json:"premier_league_winner"`
+	CommunityLeagueWinner *TeamInfo `json:"community_league_winner"`
 }
 
 type SeasonHistory struct {
@@ -326,14 +419,14 @@ var leagueConfigs = map[string]LeagueConfig{
 		TeamCount:   TeamsPerLeague,
 		Matchdays:   MatchesPerTeam,
 		StartTeamID: 1,
-		EndTeamID:   20,
+		EndTeamID:   10,
 	},
-	LeagueLaLiga: {
-		Name:        LeagueLaLiga,
+	LeagueCommunityLeague: {
+		Name:        LeagueCommunityLeague,
 		TeamCount:   TeamsPerLeague,
 		Matchdays:   MatchesPerTeam,
-		StartTeamID: 21,
-		EndTeamID:   40,
+		StartTeamID: 11,
+		EndTeamID:   20,
 	},
 }
 
@@ -367,6 +460,11 @@ var (
 	mutex             = &sync.RWMutex{}
 	version           = "1.2.0"
 
+	// Enhanced simulation variables
+	matchMomentum        = make(map[int]*MatchMomentum)              // MatchID -> Momentum
+	playerAvailability   = make(map[int]map[int]*PlayerAvailability) // MatchID -> PlayerID -> Availability
+	dynamicProbabilities = make(map[int]*DynamicMatchProbabilities)  // MatchID -> Probabilities
+
 	// Add this at the top of the file with other global variables
 	startTime = time.Now()
 )
@@ -381,49 +479,29 @@ var teamData = []struct {
 	Manager   string
 	Founded   int
 }{
-	// Premier League Teams (1-20)
-	{1, "Arsinel", "ARS", "Emerita Stadium", LeaguePremier, "Miguel Artetta", 1886},
-	{2, "Chelsey", "CHE", "Stamferd Bridge", LeaguePremier, "Maurizio Pochetino", 1905},
-	{3, "Liverpul", "LIV", "The New Anfeld", LeaguePremier, "Jurgen Klopp", 1892},
-	{4, "Menchester Citie", "MCI", "Blue Park Stadium", LeaguePremier, "Josep Guardyola", 1880},
-	{5, "Menchester Unighted", "MUN", "New Trafford", LeaguePremier, "Eric ten Haag", 1878},
-	{6, "Totenham", "TOT", "Totenham Fiery Stadium", LeaguePremier, "Angelo Postecoglu", 1882},
-	{7, "Newkastle Unighted", "NEW", "Saint Timothy Park", LeaguePremier, "Edward Howe", 1892},
-	{8, "Brighten", "BHA", "Watergate Express Stadium", LeaguePremier, "Robertu Di Zerbi", 1901},
-	{9, "Asten Vila", "AVL", "Vila Gates", LeaguePremier, "Unei Emary", 1874},
-	{10, "Westham Unighted", "WHU", "London Free City Stadium", LeaguePremier, "Davyd Mois", 1895},
-	{11, "Crystel Palas", "CRY", "Selhurst Gardens", LeaguePremier, "Roy Hodgsen", 1905},
-	{12, "Evertin", "EVE", "Goodisen Gardens", LeaguePremier, "Sean Dyche", 1878},
-	{13, "Fulhem", "FUL", "Cottage Park", LeaguePremier, "Marco Sylva", 1879},
-	{14, "Bournemoth", "BOU", "Vitality Gardens", LeaguePremier, "Andoni Iraola", 1899},
-	{15, "Lutin Town", "LUT", "Kenilworth Stadium", LeaguePremier, "Rob Edwards", 1885},
-	{16, "Notingham Forst", "NFO", "City Gardens", LeaguePremier, "Nuno Espirito", 1865},
-	{17, "Shefild Unighted", "SHU", "Bramall Fields", LeaguePremier, "Paul Heckingbottom", 1889},
-	{18, "Burnly", "BUR", "Turf Fields", LeaguePremier, "Vincent Kompany", 1882},
-	{19, "Wolfs", "WOL", "Molineux Gardens", LeaguePremier, "Gary O'Neil", 1877},
-	{20, "Breintford", "BRE", "Community Stadium", LeaguePremier, "Thomas Frank", 1889},
+	// Premier League - 10 Teams
+	{1, "Capricon FC", "CAP", "Stellar Stadium", LeaguePremier, "Viktor Cosmos", 2180},
+	{2, "The Galacticons", "GAL", "Nebula Arena", LeaguePremier, "Zara Starfield", 2175},
+	{3, "Axton Brothers", "AXT", "Quantum Park", LeaguePremier, "Rex Axiom", 2182},
+	{4, "Deuteron United", "DEU", "Fusion Field", LeaguePremier, "Nova Nucleus", 2178},
+	{5, "Saturn Rovers", "SAT", "Ring Stadium", LeaguePremier, "Luna Orbit", 2179},
+	{6, "Meteor City", "MET", "Impact Zone", LeaguePremier, "Comet Trail", 2181},
+	{7, "Cosmic Wanderers", "COS", "Infinity Ground", LeaguePremier, "Astro Nova", 2177},
+	{8, "Pulsar Athletic", "PUL", "Photon Arena", LeaguePremier, "Ray Beacon", 2183},
+	{9, "Nebula FC", "NEB", "Star Dust Stadium", LeaguePremier, "Cloud Walker", 2176},
+	{10, "Eclipse United", "ECL", "Shadow Grounds", LeaguePremier, "Dark Matter", 2184},
 
-	// La Liga Teams (21-40)
-	{21, "Reel Madred", "RMA", "Santiego De Ramon", LeagueLaLiga, "Carlo Ancheloti", 1902},
-	{22, "Barselona", "BAR", "Camp Nu", LeagueLaLiga, "Chavi Ernandes", 1899},
-	{23, "Atletiko Madred", "ATM", "Metropolitan Alfredo Stadium", LeagueLaLiga, "Diego Simeoane", 1903},
-	{24, "Athletik Bilbau", "ATH", "San Marino De Valdes", LeagueLaLiga, "Ernesto Valverdi", 1898},
-	{25, "Reel Sosyedad", "RSO", "Reale Areno", LeagueLaLiga, "Imanuel Alguasil", 1909},
-	{26, "Vilareal", "VIL", "Estadio de la Submarino", LeagueLaLiga, "Marselino Garsia", 1923},
-	{27, "Sevilia", "SEV", "Ramon Kareem Stadium", LeagueLaLiga, "Jose Luis Mendilebar", 1890},
-	{28, "Reel Betis", "BET", "Benitu New Park Stadium", LeagueLaLiga, "Manuel Pellegrini", 1907},
-	{29, "Valensia", "VAL", "Mestaya", LeagueLaLiga, "Ruben Baraha", 1919},
-	{30, "Getaffe", "GET", "Coliseum Alfonsu Dias", LeagueLaLiga, "Jose Bordalas", 1983},
-	{31, "Espanyol", "ESP", "Cornella-El Prat", LeagueLaLiga, "Luis Garcia", 1900},
-	{32, "Rayo Valekano", "RAY", "Estadio de Vallekas", LeagueLaLiga, "Inigo Perez", 1924},
-	{33, "Celta Vigo", "CEL", "Balaidos", LeagueLaLiga, "Claudio Giraldez", 1923},
-	{34, "Deportivo Alaves", "ALA", "Mendizorrotza", LeagueLaLiga, "Luis Garcia Plaza", 1921},
-	{35, "Real Mallorca", "MAL", "Visit Mallorca Estadi", LeagueLaLiga, "Javier Aguirre", 1916},
-	{36, "Las Palmas", "LAS", "Estadio Gran Canaria", LeagueLaLiga, "Garcia Pimienta", 1949},
-	{37, "Girona FC", "GIR", "Estadi Montilivi", LeagueLaLiga, "Michel Sanchez", 1930},
-	{38, "Osasuna", "OSA", "El Sadar", LeagueLaLiga, "Jagoba Arrasate", 1920},
-	{39, "Granada CF", "GRA", "Nuevo Los Carmenes", LeagueLaLiga, "Paco Lopez", 1931},
-	{40, "Cadiz CF", "CAD", "Estadio Ramon de Carranza", LeagueLaLiga, "Mauricio Pellegrino", 1910},
+	// Community League - 10 Teams
+	{11, "Nova Dynamics", "NOV", "Quantum Field", LeagueCommunityLeague, "Atlas Prime", 2178},
+	{12, "Starlight FC", "SFC", "Celestial Arena", LeagueCommunityLeague, "Vega Solaris", 2181},
+	{13, "Orion Warriors", "ORI", "Constellation Park", LeagueCommunityLeague, "Leo Sterling", 2176},
+	{14, "Zenith United", "ZEN", "Horizon Stadium", LeagueCommunityLeague, "Aurora Borealis", 2183},
+	{15, "Quasar City", "QUA", "Plasma Ground", LeagueCommunityLeague, "Sirius Flux", 2179},
+	{16, "Astral Rovers", "AST", "Galaxy Dome", LeagueCommunityLeague, "Helios Star", 2182},
+	{17, "Eclipse Knights", "EKN", "Shadow Field", LeagueCommunityLeague, "Umbra Knight", 2177},
+	{18, "Neutron FC", "NEU", "Energy Arena", LeagueCommunityLeague, "Proton Wave", 2180},
+	{19, "Vortex Athletic", "VOR", "Cyclone Stadium", LeagueCommunityLeague, "Tempest Storm", 2175},
+	{20, "Cosmic Rangers", "COS", "Meteor Ground", LeagueCommunityLeague, "Comet Chase", 2184},
 }
 
 var playerNames = []struct {
@@ -474,6 +552,21 @@ func applicationMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "*")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 func init() {
 	rand.Seed(time.Now().UnixNano())
 	loadVersion()
@@ -504,26 +597,34 @@ func initializeSimulation() {
 			League:     teamInfo.League,
 			Form:       []string{},
 			FormPoints: 0,
-			HomeStreak: 0,
-			AwayStreak: 0,
 		}
 	}
 
 	playerID := 1
 	for _, team := range teams {
-		for i := 0; i < 25; i++ {
-			playerTemplate := playerNames[rand.Intn(len(playerNames))]
-			name := playerTemplate.Name
-			if i > len(playerNames)-1 {
-				name = fmt.Sprintf("%s %d", playerTemplate.Name, i)
-			}
+		// Realistic squad composition: 18-20 players per team
+		positions := []string{
+			PosGK, PosGK, // 2 goalkeepers
+			PosCB, PosCB, PosCB, // 3 center backs
+			PosLB, PosLB, // 2 left backs
+			PosRB, PosRB, // 2 right backs
+			PosCDM, PosCDM, // 2 defensive mids
+			PosCM, PosCM, PosCM, // 3 central mids
+			PosCAM,       // 1 attacking mid
+			PosLW, PosRW, // 2 wingers
+			PosST, PosST, // 2 strikers
+		}
 
-			characteristics := generatePlayerCharacteristics(playerTemplate.Position)
+		for i, position := range positions {
+			playerTemplate := playerNames[rand.Intn(len(playerNames))]
+			name := fmt.Sprintf("%s %d", playerTemplate.Name, i+1)
+
+			characteristics := generatePlayerCharacteristics(position)
 
 			players[playerID] = &Player{
 				ID:              playerID,
 				Name:            name,
-				Position:        playerTemplate.Position,
+				Position:        position, // Use actual position, not template
 				Number:          i + 1,
 				Age:             18 + rand.Intn(20),
 				Nationality:     playerTemplate.Nationality,
@@ -559,7 +660,7 @@ func initializeSimulation() {
 		matchesCreated := 0
 
 		// Create matches for each league
-		for _, league := range []string{LeaguePremier, LeagueLaLiga} {
+		for _, league := range []string{LeaguePremier, LeagueCommunityLeague} {
 			for i := 0; i < MaxSimultaneousMatches; i++ {
 				// Find next match for this specific league
 				nextMatch := getNextUnplayedMatchForLeague(league)
@@ -921,70 +1022,472 @@ func generateMatchEvent(match *Match) {
 }
 
 func handleGoalEvent(matchID int, match *Match) {
-	// Calculate goal probability based on team strengths
-	homeStrength := calculateTeamStrength(&match.HomeTeam)
-	awayStrength := calculateTeamStrength(&match.AwayTeam)
+	ball := ballPositions[matchID]
+	if ball == nil {
+		return
+	}
 
-	// Determine scoring team based on strengths
-	isHomeGoal := rand.Float32() < float32(homeStrength/(homeStrength+awayStrength))
+	// O(1) scoring: whoever has the ball scores (realistic!)
 	var scorer *Player
+	if ball.PossessorID > 0 {
+		if player, exists := players[ball.PossessorID]; exists {
+			// Only attackers and midfielders can score in attacking third
+			if ball.X > 70 || ball.X < 30 { // In attacking third
+				if player.Position != PosGK && rand.Float64() < getGoalProbability(player, ball) {
+					scorer = player
+				}
+			}
+		}
+	}
 
-	if isHomeGoal {
-		scorer = getRandomPlayerFromTeam(match.HomeTeam.ID)
-		match.HomeScore++
-		logInfo("⚽ GOAL! %s scores for %s! New score: %s %d-%d %s",
-			scorer.Name, match.HomeTeam.ShortName,
-			match.HomeTeam.ShortName, match.HomeScore, match.AwayScore, match.AwayTeam.ShortName)
-	} else {
-		scorer = getRandomPlayerFromTeam(match.AwayTeam.ID)
-		match.AwayScore++
-		logInfo("⚽ GOAL! %s scores for %s! New score: %s %d-%d %s",
-			scorer.Name, match.AwayTeam.ShortName,
-			match.HomeTeam.ShortName, match.HomeScore, match.AwayScore, match.AwayTeam.ShortName)
+	// If no possessor or GK has ball, find nearest attacking player
+	if scorer == nil {
+		scorer = findNearestAttackingPlayer(matchID, ball)
 	}
 
 	if scorer != nil {
+		isHomeGoal := scorer.TeamID == match.HomeTeam.ID
+		if isHomeGoal {
+			match.HomeScore++
+		} else {
+			match.AwayScore++
+		}
+
+		// Update scorer stats
 		scorer.Goals++
 		scorer.SeasonStats.GoalsThisSeason++
-		scorer.CurrentRating += 1.5
+		scorer.CurrentRating += 2.0
 
-		addLiveCommentary(matchID, match.Minute,
-			fmt.Sprintf("GOAL! %s scores! What a fantastic finish!", scorer.Name),
-			EventGoal, scorer)
+		// O(1) assist: previous ball possessor gets assist
+		var assister *Player
+		if ball.LastTouchID != 0 && ball.LastTouchID != scorer.ID {
+			if player, exists := players[ball.LastTouchID]; exists &&
+				player.TeamID == scorer.TeamID { // Same team
+				assister = player
+				assister.Assists++
+				assister.SeasonStats.AssistsThisSeason++
+				assister.CurrentRating += 1.0
+			}
+		}
 
-		logInfo("📈 Player stats updated: %s now has %d goals this season", scorer.Name, scorer.SeasonStats.GoalsThisSeason)
+		// Update momentum - goals significantly impact the game
+		updateMatchMomentum(matchID, match, "goal", scorer.TeamID)
+
+		// Recalculate match probabilities after goal
+		recalculateMatchProbabilities(matchID, match)
+
+		// Reset ball for kickoff
+		setBallEvent(matchID, BallEventKickoff, FieldWidth/2, FieldHeight/2, 0)
+
+		// Commentary with assist info
+		commentary := fmt.Sprintf("GOAL! %s scores!", scorer.Name)
+		if assister != nil {
+			commentary += fmt.Sprintf(" Assisted by %s.", assister.Name)
+		}
+		addLiveCommentary(matchID, match.Minute, commentary, EventGoal, scorer)
 	}
 }
 
-func handleCardEvent(matchID int, match *Match) {
-	isHomePlayer := rand.Float32() < 0.5
-	var player *Player
+func getGoalProbability(player *Player, ball *BallPosition) float64 {
+	baseProbability := 0.25
 
-	if isHomePlayer {
-		player = getRandomPlayerFromTeam(match.HomeTeam.ID)
-	} else {
-		player = getRandomPlayerFromTeam(match.AwayTeam.ID)
+	// Determine which goal we're attacking
+	goalX := FieldWidth
+	if ball.X < FieldWidth/2 {
+		goalX = 0
+	}
+	goalY := FieldHeight / 2
+
+	// Distance from goal (most important factor)
+	distanceToGoal := math.Sqrt(math.Pow(ball.X-goalX, 2) + math.Pow(ball.Y-goalY, 2))
+
+	// Position-based multiplier (natural ability)
+	positionMultiplier := 1.0
+	switch player.Position {
+	case PosST:
+		positionMultiplier = 1.8
+	case PosCAM, PosLW, PosRW:
+		positionMultiplier = 1.4
+	case PosCM:
+		positionMultiplier = 1.0
+	case PosCDM:
+		positionMultiplier = 0.7
+	case PosLB, PosRB:
+		positionMultiplier = 0.5
+	case PosCB:
+		positionMultiplier = 0.4
+	case PosGK:
+		positionMultiplier = 0.02
 	}
 
-	if player != nil {
-		cardType := "yellow"
-		if rand.Float32() < 0.1 { // 10% chance for red card
-			cardType = "red"
-			player.RedCards++
-			player.SeasonStats.RedCardsThisSeason++
-			player.CurrentRating -= 2.0
-			logInfo("🟥 RED CARD! %s receives a red card!", player.Name)
-		} else {
-			player.YellowCards++
-			player.SeasonStats.YellowCardsThisSeason++
-			player.CurrentRating -= 0.5
-			logInfo("🟨 YELLOW CARD! %s receives a yellow card", player.Name)
+	// Location-based multiplier (opportunity)
+	locationMultiplier := 1.0
+	if distanceToGoal < 8 { // In the box
+		locationMultiplier = 2.5
+	} else if distanceToGoal < 15 { // Close to box
+		locationMultiplier = 1.8
+	} else if distanceToGoal < 25 { // Edge of area
+		locationMultiplier = 1.2
+	} else if distanceToGoal > 40 { // Very far
+		locationMultiplier = 0.3
+	}
+
+	// Angle to goal (center is better)
+	angleToCenterGoal := math.Abs(ball.Y - goalY)
+	if angleToCenterGoal < 5 { // Central position
+		locationMultiplier *= 1.3
+	} else if angleToCenterGoal > 15 { // Wide angle
+		locationMultiplier *= 0.7
+	}
+
+	// If player is in unusual attacking position, boost chance
+	isInAttackingPosition := false
+	if player.TeamID == getHomeTeamID() && ball.X > FieldWidth*0.6 {
+		isInAttackingPosition = true
+	} else if player.TeamID != getHomeTeamID() && ball.X < FieldWidth*0.4 {
+		isInAttackingPosition = true
+	}
+
+	if isInAttackingPosition && (player.Position == PosCM || player.Position == PosCDM ||
+		player.Position == PosLB || player.Position == PosRB) {
+		locationMultiplier *= 1.5 // Reward unexpected attackers
+	}
+
+	finalProbability := baseProbability * positionMultiplier * locationMultiplier
+	return math.Min(0.9, math.Max(0.01, finalProbability))
+}
+
+func getHomeTeamID() int {
+	// Helper to identify home team (assumes first match)
+	for _, match := range matches {
+		return match.HomeTeam.ID
+	}
+	return 1
+}
+
+func findNearestAttackingPlayer(matchID int, ball *BallPosition) *Player {
+	var nearestPlayer *Player
+	minDistance := math.Inf(1)
+
+	// Get the match to determine which team is attacking
+	match, exists := matches[matchID]
+	if !exists {
+		return nil
+	}
+
+	// Determine which team is attacking based on ball position
+	// If ball is in the right half (x > 50), home team is attacking
+	// If ball is in the left half (x < 50), away team is attacking
+	var attackingTeamID int
+	if ball.X > 50 {
+		attackingTeamID = match.HomeTeam.ID
+	} else {
+		attackingTeamID = match.AwayTeam.ID
+	}
+
+	if locations, exists := playerLocations[matchID]; exists {
+		for playerID, location := range locations {
+			if player, exists := players[playerID]; exists {
+				// Only consider attacking players from the attacking team
+				if player.TeamID == attackingTeamID &&
+					(player.Position == PosST || player.Position == PosCAM ||
+						player.Position == PosLW || player.Position == PosRW) {
+					distance := math.Sqrt(math.Pow(location.X-ball.X, 2) + math.Pow(location.Y-ball.Y, 2))
+					if distance < minDistance && distance < 15 {
+						minDistance = distance
+						nearestPlayer = player
+					}
+				}
+			}
 		}
+	}
+
+	return nearestPlayer
+}
+
+func handleCardEvent(matchID int, match *Match) {
+	// Only select from available players
+	availablePlayers := getAvailablePlayersForMatch(matchID)
+	if len(availablePlayers) == 0 {
+		return
+	}
+
+	player := availablePlayers[rand.Intn(len(availablePlayers))]
+	isHomePlayer := player.TeamID == match.HomeTeam.ID
+
+	cardType := "yellow"
+	if rand.Float32() < 0.1 { // 10% chance for red card
+		cardType = "red"
+		player.RedCards++
+		player.SeasonStats.RedCardsThisSeason++
+		player.CurrentRating -= 2.0
+
+		// Mark player as unavailable due to red card
+		setPlayerUnavailable(matchID, player.ID, PlayerRedCard, match.Minute, "Direct red card")
+
+		// Update momentum - red card affects team morale
+		updateMatchMomentum(matchID, match, "red_card", player.TeamID)
+
+		// Recalculate match probabilities
+		recalculateMatchProbabilities(matchID, match)
+
+		logInfo("🟥 RED CARD! %s receives a red card and is sent off!", player.Name)
 
 		addLiveCommentary(matchID, match.Minute,
-			fmt.Sprintf("%s card shown to %s", strings.Title(cardType), player.Name),
+			fmt.Sprintf("RED CARD! %s is sent off! %s down to 10 men!",
+				player.Name,
+				getTeamName(player.TeamID)),
+			EventCard, player)
+	} else {
+		player.YellowCards++
+		player.SeasonStats.YellowCardsThisSeason++
+		player.CurrentRating -= 0.5
+		logInfo("🟨 YELLOW CARD! %s receives a yellow card", player.Name)
+
+		addLiveCommentary(matchID, match.Minute,
+			fmt.Sprintf("Yellow card shown to %s", player.Name),
 			EventCard, player)
 	}
+
+	// Update match stats
+	if isHomePlayer {
+		if cardType == "red" {
+			matchStats[matchID].HomeRedCards++
+		} else {
+			matchStats[matchID].HomeYellowCards++
+		}
+	} else {
+		if cardType == "red" {
+			matchStats[matchID].AwayRedCards++
+		} else {
+			matchStats[matchID].AwayYellowCards++
+		}
+	}
+}
+
+// Player availability management
+func getAvailablePlayersForMatch(matchID int) []*Player {
+	var available []*Player
+	match := matches[matchID]
+	if match == nil {
+		return available
+	}
+
+	// Get all players from both teams
+	homePlayers := getPlayersFromTeam(match.HomeTeam.ID)
+	awayPlayers := getPlayersFromTeam(match.AwayTeam.ID)
+	allPlayers := append(homePlayers, awayPlayers...)
+
+	// Filter out unavailable players
+	for _, player := range allPlayers {
+		if isPlayerAvailable(matchID, player.ID) {
+			available = append(available, player)
+		}
+	}
+	return available
+}
+
+func isPlayerAvailable(matchID, playerID int) bool {
+	if playerAvailability[matchID] == nil {
+		return true
+	}
+	availability := playerAvailability[matchID][playerID]
+	return availability == nil || availability.Status == PlayerAvailable
+}
+
+func setPlayerUnavailable(matchID, playerID int, status string, minute int, reason string) {
+	if playerAvailability[matchID] == nil {
+		playerAvailability[matchID] = make(map[int]*PlayerAvailability)
+	}
+
+	playerAvailability[matchID][playerID] = &PlayerAvailability{
+		PlayerID:        playerID,
+		Status:          status,
+		UnavailableFrom: minute,
+		Reason:          reason,
+	}
+}
+
+func getTeamName(teamID int) string {
+	if team := teams[teamID]; team != nil {
+		return team.ShortName
+	}
+	return "Unknown"
+}
+
+// Match momentum management
+func updateMatchMomentum(matchID int, match *Match, eventType string, affectedTeamID int) {
+	if matchMomentum[matchID] == nil {
+		matchMomentum[matchID] = &MatchMomentum{
+			HomeTeamMomentum: 0.0,
+			AwayTeamMomentum: 0.0,
+			LastUpdateTime:   time.Now(),
+		}
+	}
+
+	momentum := matchMomentum[matchID]
+	isHomeTeam := affectedTeamID == match.HomeTeam.ID
+
+	switch eventType {
+	case "goal":
+		if isHomeTeam {
+			momentum.HomeTeamMomentum += 0.3
+			momentum.AwayTeamMomentum -= 0.2
+		} else {
+			momentum.AwayTeamMomentum += 0.3
+			momentum.HomeTeamMomentum -= 0.2
+		}
+		momentum.LastGoalTime = match.Minute
+		momentum.LastGoalTeam = affectedTeamID
+		momentum.ConsecutiveGoals++
+
+	case "red_card":
+		if isHomeTeam {
+			momentum.HomeTeamMomentum -= 0.4
+			momentum.AwayTeamMomentum += 0.2
+		} else {
+			momentum.AwayTeamMomentum -= 0.4
+			momentum.HomeTeamMomentum += 0.2
+		}
+		momentum.LastRedCardTime = match.Minute
+		momentum.LastRedCardTeam = affectedTeamID
+
+	case "corner":
+		adjustment := 0.1
+		if isHomeTeam {
+			momentum.HomeTeamMomentum += adjustment
+		} else {
+			momentum.AwayTeamMomentum += adjustment
+		}
+
+	case "foul":
+		adjustment := 0.05
+		if isHomeTeam {
+			momentum.HomeTeamMomentum -= adjustment
+		} else {
+			momentum.AwayTeamMomentum -= adjustment
+		}
+	}
+
+	// Clamp momentum values between -1.0 and 1.0
+	momentum.HomeTeamMomentum = math.Max(-1.0, math.Min(1.0, momentum.HomeTeamMomentum))
+	momentum.AwayTeamMomentum = math.Max(-1.0, math.Min(1.0, momentum.AwayTeamMomentum))
+	momentum.LastUpdateTime = time.Now()
+}
+
+// Dynamic probability calculation
+func recalculateMatchProbabilities(matchID int, match *Match) {
+	if dynamicProbabilities[matchID] == nil {
+		dynamicProbabilities[matchID] = &DynamicMatchProbabilities{
+			MatchID: matchID,
+			Factors: make(map[string]float64),
+		}
+	}
+
+	probs := dynamicProbabilities[matchID]
+	momentum := matchMomentum[matchID]
+
+	// Base probabilities from pre-match calculation
+	baseHomeWin, _, baseAwayWin := calculateMatchProbabilities(&match.HomeTeam, &match.AwayTeam)
+
+	// Adjust for current score
+	scoreDiff := match.HomeScore - match.AwayScore
+	scoreAdjustment := float64(scoreDiff) * 0.1
+
+	// Adjust for player numbers (red cards)
+	homePlayerCount := 11 - getRedCardCount(matchID, match.HomeTeam.ID)
+	awayPlayerCount := 11 - getRedCardCount(matchID, match.AwayTeam.ID)
+	playerDiff := float64(homePlayerCount-awayPlayerCount) * 0.15
+
+	// Adjust for momentum
+	momentumAdjustment := 0.0
+	if momentum != nil {
+		momentumAdjustment = (momentum.HomeTeamMomentum - momentum.AwayTeamMomentum) * 0.2
+	}
+
+	// Adjust for time remaining - more conservative as time runs out
+	timeRemaining := 90 - match.Minute
+	timeMultiplier := 1.0
+	if timeRemaining < 15 {
+		timeMultiplier = 0.5 + (float64(timeRemaining) / 30.0)
+	}
+
+	// Calculate adjusted probabilities
+	totalAdjustment := (scoreAdjustment + playerDiff + momentumAdjustment) * timeMultiplier
+
+	probs.HomeWinProbability = math.Max(0.05, math.Min(0.9, baseHomeWin+totalAdjustment))
+	probs.AwayWinProbability = math.Max(0.05, math.Min(0.9, baseAwayWin-totalAdjustment))
+	probs.DrawProbability = math.Max(0.05, 1.0-probs.HomeWinProbability-probs.AwayWinProbability)
+
+	// Normalize
+	total := probs.HomeWinProbability + probs.DrawProbability + probs.AwayWinProbability
+	probs.HomeWinProbability /= total
+	probs.DrawProbability /= total
+	probs.AwayWinProbability /= total
+
+	// Calculate next goal probabilities
+	probs.HomeNextGoalProb = calculateNextGoalProbability(match, true, momentum)
+	probs.AwayNextGoalProb = calculateNextGoalProbability(match, false, momentum)
+	probs.NextGoalProbability = probs.HomeNextGoalProb + probs.AwayNextGoalProb
+
+	// Store contributing factors
+	probs.Factors["score_diff"] = scoreAdjustment
+	probs.Factors["player_diff"] = playerDiff
+	probs.Factors["momentum"] = momentumAdjustment
+	probs.Factors["time_multiplier"] = timeMultiplier
+
+	probs.LastUpdate = time.Now()
+}
+
+func getRedCardCount(matchID, teamID int) int {
+	count := 0
+	if playerAvailability[matchID] != nil {
+		for playerID, availability := range playerAvailability[matchID] {
+			if availability.Status == PlayerRedCard {
+				player := getPlayerByID(playerID)
+				if player != nil && player.TeamID == teamID {
+					count++
+				}
+			}
+		}
+	}
+	return count
+}
+
+func getPlayerByID(playerID int) *Player {
+	return players[playerID]
+}
+
+func calculateNextGoalProbability(match *Match, isHome bool, momentum *MatchMomentum) float64 {
+	baseProb := 0.02 // 2% base chance per minute
+
+	// Adjust for team attacking strength
+	var team *TeamInfo
+	if isHome {
+		team = &match.HomeTeam
+	} else {
+		team = &match.AwayTeam
+	}
+
+	attackStrength := calculateAttackStrength(team)
+	baseProb *= attackStrength * 2.0
+
+	// Adjust for momentum
+	if momentum != nil {
+		if isHome {
+			baseProb *= (1.0 + momentum.HomeTeamMomentum*0.5)
+		} else {
+			baseProb *= (1.0 + momentum.AwayTeamMomentum*0.5)
+		}
+	}
+
+	// Adjust for player count
+	playerCount := 11 - getRedCardCount(match.ID, team.ID)
+	if playerCount < 11 {
+		baseProb *= (float64(playerCount) / 11.0)
+	}
+
+	return math.Max(0.001, math.Min(0.1, baseProb))
 }
 
 // Cooldown and next match creation
@@ -1072,6 +1575,27 @@ func createNextMatch() {
 	matchStats[matchCounter] = generateInitialMatchStats(matchCounter)
 	liveCommentary[matchCounter] = []*LiveCommentary{}
 	playerLocations[matchCounter] = make(map[int]*PlayerLocation)
+
+	// Initialize enhanced simulation data
+	matchMomentum[matchCounter] = &MatchMomentum{
+		HomeTeamMomentum: 0.0,
+		AwayTeamMomentum: 0.0,
+		LastUpdateTime:   time.Now(),
+	}
+
+	dynamicProbabilities[matchCounter] = &DynamicMatchProbabilities{
+		MatchID:             matchCounter,
+		HomeWinProbability:  homeWin,
+		DrawProbability:     draw,
+		AwayWinProbability:  awayWin,
+		NextGoalProbability: 0.02,
+		HomeNextGoalProb:    0.01,
+		AwayNextGoalProb:    0.01,
+		LastUpdate:          time.Now(),
+		Factors:             make(map[string]float64),
+	}
+
+	playerAvailability[matchCounter] = make(map[int]*PlayerAvailability)
 
 	// Add kickoff commentary with form and probability information
 	homeForm := fmt.Sprintf("Form: %v", scheduledMatch.HomeTeam.Form)
@@ -1346,19 +1870,161 @@ func getMatchLocations(w http.ResponseWriter, r *http.Request) {
 		locations = make(map[int]*PlayerLocation)
 	}
 
-	locationList := make([]*PlayerLocation, 0, len(locations))
+	// Get only the first 11 players from each team
+	homeTeamID := matches[id].HomeTeam.ID
+	awayTeamID := matches[id].AwayTeam.ID
+
+	homeCount := 0
+	awayCount := 0
+	locationList := make([]*PlayerLocation, 0, 22) // Pre-allocate for 22 players
+
 	for _, location := range locations {
-		locationList = append(locationList, location)
+		if player, exists := players[location.PlayerID]; exists {
+			if player.TeamID == homeTeamID && homeCount < 11 {
+				locationList = append(locationList, location)
+				homeCount++
+			} else if player.TeamID == awayTeamID && awayCount < 11 {
+				locationList = append(locationList, location)
+				awayCount++
+			}
+		}
 	}
+
+	// Get ball position
+	ball := ballPositions[id]
 	mutex.RUnlock()
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	response := map[string]interface{}{
 		"locations": locationList,
 		"match_id":  id,
 		"count":     len(locationList),
 		"timestamp": time.Now(),
-	})
+	}
+
+	// Add ball position if it exists
+	if ball != nil {
+		response["ball"] = ball
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+func getMatchMomentum(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid match ID", http.StatusBadRequest)
+		return
+	}
+
+	mutex.RLock()
+	momentum := matchMomentum[id]
+	mutex.RUnlock()
+
+	response := map[string]interface{}{
+		"match_id":  id,
+		"timestamp": time.Now(),
+	}
+
+	if momentum != nil {
+		response["momentum"] = momentum
+	} else {
+		response["momentum"] = nil
+		response["message"] = "No momentum data available for this match"
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+func getMatchProbabilities(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid match ID", http.StatusBadRequest)
+		return
+	}
+
+	mutex.RLock()
+	probs := dynamicProbabilities[id]
+	match := matches[id]
+	mutex.RUnlock()
+
+	response := map[string]interface{}{
+		"match_id":  id,
+		"timestamp": time.Now(),
+	}
+
+	if probs != nil {
+		response["probabilities"] = probs
+	} else if match != nil {
+		// Calculate initial probabilities if none exist
+		homeWin, draw, awayWin := calculateMatchProbabilities(&match.HomeTeam, &match.AwayTeam)
+		response["probabilities"] = map[string]interface{}{
+			"home_win_prob": homeWin,
+			"draw_prob":     draw,
+			"away_win_prob": awayWin,
+			"calculated_at": time.Now(),
+			"note":          "Initial pre-match probabilities",
+		}
+	} else {
+		response["probabilities"] = nil
+		response["message"] = "Match not found"
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+func getMatchAvailability(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid match ID", http.StatusBadRequest)
+		return
+	}
+
+	mutex.RLock()
+	availability := playerAvailability[id]
+	match := matches[id]
+	mutex.RUnlock()
+
+	if match == nil {
+		http.Error(w, "Match not found", http.StatusNotFound)
+		return
+	}
+
+	// Get available and unavailable players
+	availablePlayers := getAvailablePlayersForMatch(id)
+	var unavailablePlayers []map[string]interface{}
+
+	for _, avail := range availability {
+		if avail.Status != PlayerAvailable {
+			player := getPlayerByID(avail.PlayerID)
+			if player != nil {
+				unavailablePlayers = append(unavailablePlayers, map[string]interface{}{
+					"player":           player,
+					"status":           avail.Status,
+					"unavailable_from": avail.UnavailableFrom,
+					"reason":           avail.Reason,
+				})
+			}
+		}
+	}
+
+	response := map[string]interface{}{
+		"match_id":            id,
+		"available_count":     len(availablePlayers),
+		"unavailable_count":   len(unavailablePlayers),
+		"unavailable_players": unavailablePlayers,
+		"home_player_count":   11 - getRedCardCount(id, match.HomeTeam.ID),
+		"away_player_count":   11 - getRedCardCount(id, match.AwayTeam.ID),
+		"timestamp":           time.Now(),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
 }
 
 func getSeasonHistory(w http.ResponseWriter, r *http.Request) {
@@ -1651,7 +2317,7 @@ func healthCheck(w http.ResponseWriter, r *http.Request) {
 }
 
 func serveHomepage(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	mutex.RLock()
 	templateData := struct {
@@ -1682,97 +2348,190 @@ func serveHomepage(w http.ResponseWriter, r *http.Request) {
             font-family: system-ui, -apple-system, sans-serif;
             margin: 0;
             padding: 20px;
-            background: #f8f9fa;
-            height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
             box-sizing: border-box;
         }
         .container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
             background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            height: calc(100vh - 40px);
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            min-height: calc(100vh - 40px);
         }
         .header {
-            margin-bottom: 20px;
+            text-align: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #f1f3f4;
+        }
+        .header h1 {
+            font-size: 2.5rem;
+            margin: 0 0 10px 0;
+            color: #333;
+        }
+        .header p {
+            color: #6c757d;
+            font-size: 1.1rem;
+            margin: 0;
+        }
+        .status {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 25px 0;
+        }
+        .status-item {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        .status-value {
+            font-size: 2rem;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .status-label {
+            font-size: 0.9rem;
+            opacity: 0.9;
         }
         .content {
             display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 20px;
-            overflow: hidden;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 25px;
         }
         .section {
             background: #f8f9fa;
-            padding: 15px;
-            border-radius: 6px;
-            overflow-y: auto;
-            max-height: calc(100vh - 200px);
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
         }
-        h1, h2 {
-            margin: 0 0 15px 0;
-            color: #212529;
-        }
-        h2 {
-            font-size: 1.2rem;
+        .section h2 {
+            margin: 0 0 20px 0;
             color: #495057;
+            font-size: 1.4rem;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #dee2e6;
+        }
+        .endpoint-group {
+            margin-bottom: 20px;
+        }
+        .endpoint-group h3 {
+            margin: 0 0 12px 0;
+            font-size: 1.1rem;
+            color: #6c757d;
+            background: #e9ecef;
+            padding: 8px 12px;
+            border-radius: 5px;
+            border-left: 4px solid #007bff;
         }
         ul {
             margin: 0;
-            padding-left: 20px;
+            padding: 0;
+            list-style: none;
         }
         li {
             margin-bottom: 8px;
-            font-size: 0.9rem;
+            padding: 8px 12px;
+            background: white;
+            border-radius: 5px;
+            border-left: 3px solid #007bff;
+            transition: all 0.2s ease;
+        }
+        li:hover {
+            background: #f0f8ff;
+            border-left-color: #0056b3;
+            transform: translateX(5px);
         }
         a {
             color: #007bff;
             text-decoration: none;
+            font-weight: 500;
+            display: block;
         }
         a:hover {
-            text-decoration: underline;
+            color: #0056b3;
         }
-        .status {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 10px;
-            margin-bottom: 15px;
+        .new-feature {
+            position: relative;
         }
-        .status-item {
-            background: #e9ecef;
-            padding: 10px;
-            border-radius: 4px;
+        .new-feature::after {
+            content: "NEW";
+            background: #28a745;
+            color: white;
+            font-size: 0.7rem;
+            padding: 2px 6px;
+            border-radius: 10px;
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+        .enhanced-feature {
+            position: relative;
+        }
+        .enhanced-feature::after {
+            content: "ENHANCED";
+            background: #ffc107;
+            color: #212529;
+            font-size: 0.7rem;
+            padding: 2px 6px;
+            border-radius: 10px;
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+        .footer {
             text-align: center;
-        }
-        .status-value {
-            font-size: 1.2rem;
-            font-weight: bold;
-            color: #007bff;
-        }
-        .status-label {
-            font-size: 0.8rem;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 2px solid #f1f3f4;
             color: #6c757d;
         }
-        .endpoint-group {
-            margin-bottom: 15px;
+        .api-schema-link {
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 25px;
+            text-decoration: none;
+            font-weight: bold;
+            margin-top: 15px;
+            transition: transform 0.2s ease;
         }
-        .endpoint-group h3 {
-            margin: 0 0 10px 0;
-            font-size: 1rem;
-            color: #495057;
+        .api-schema-link:hover {
+            transform: translateY(-2px);
+            color: white;
+        }
+        .github-link {
+            display: inline-block;
+            background: #24292e;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 25px;
+            text-decoration: none;
+            font-weight: bold;
+            margin-top: 15px;
+            margin-left: 10px;
+            transition: transform 0.2s ease;
+        }
+        .github-link:hover {
+            transform: translateY(-2px);
+            color: white;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>MatchPulse API v{{.Version}}</h1>
-            <p>Real-time football simulation for state management testing</p>
+            <h1>⚽ MatchPulse API v{{.Version}}</h1>
+            <p>Real-time Football Simulation with Enhanced Match Dynamics</p>
             <div class="status">
                 <div class="status-item">
                     <div class="status-value">{{.ActiveMatches}}</div>
@@ -1786,73 +2545,99 @@ func serveHomepage(w http.ResponseWriter, r *http.Request) {
                     <div class="status-value">{{.TotalTeams}}</div>
                     <div class="status-label">Total Teams</div>
                 </div>
+                <div class="status-item">
+                    <div class="status-value">Season {{.CurrentSeason}}</div>
+                    <div class="status-label">Current Season</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-value">Week {{.CurrentMatchweek}}</div>
+                    <div class="status-label">Current Matchweek</div>
+                </div>
             </div>
         </div>
         <div class="content">
             <div class="section">
-                <h2>Core Endpoints</h2>
+                <h2>🏈 Match Endpoints</h2>
                 <div class="endpoint-group">
-                    <h3>Matches</h3>
+                    <h3>Core Match Data</h3>
                     <ul>
                         <li><a href="/api/v1/matches">All Matches</a></li>
-                        <li><a href="/api/v1/matches?status=LIVE">Live Matches</a></li>
-                        <li><a href="/api/v1/matches?status=FINISHED">Finished Matches</a></li>
-                        <li><a href="/api/v1/matches?status=HALFTIME">Halftime Matches</a></li>
-                        <li><a href="/api/v1/matches?league=Premier%20League">Premier League Matches</a></li>
-                        <li><a href="/api/v1/matches?league=La%20Liga">La Liga Matches</a></li>
+                        <li><a href="/api/v1/matches?status=live">Live Matches</a></li>
+                        <li><a href="/api/v1/matches?status=finished">Finished Matches</a></li>
+                        <li><a href="/api/v1/matches?league=Premier%20League">Premier League</a></li>
+                        <li><a href="/api/v1/matches?league=Community%20League">Community League</a></li>
+                        <li><a href="/api/v1/matches/1">Match Details</a></li>
+                        <li><a href="/api/v1/matches/1/stats">Match Statistics</a></li>
+                        <li><a href="/api/v1/matches/1/commentary">Live Commentary</a></li>
                     </ul>
                 </div>
                 <div class="endpoint-group">
-                    <h3>Teams & Players</h3>
+                    <h3>Enhanced Match Features</h3>
                     <ul>
-                        <li><a href="/api/v1/teams">All Teams</a></li>
-                        <li><a href="/api/v1/teams?league=Premier%20League">Premier League Teams</a></li>
-                        <li><a href="/api/v1/teams?league=La%20Liga">La Liga Teams</a></li>
-                        <li><a href="/api/v1/players">All Players</a></li>
-                        <li><a href="/api/v1/players?position=ST">Strikers</a></li>
-                        <li><a href="/api/v1/players?position=GK">Goalkeepers</a></li>
-                    </ul>
-                </div>
-                <div class="endpoint-group">
-                    <h3>League Tables</h3>
-                    <ul>
-                        <li><a href="/api/v1/league-table/Premier%20League">Premier League Table</a></li>
-                        <li><a href="/api/v1/league-table/La%20Liga">La Liga Table</a></li>
-                        <li><a href="/api/v1/league/Premier%20League/form">Premier League Form</a></li>
-                        <li><a href="/api/v1/league/La%20Liga/form">La Liga Form</a></li>
+                        <li class="new-feature"><a href="/api/v1/matches/1/momentum">Match Momentum</a></li>
+                        <li class="new-feature"><a href="/api/v1/matches/1/probabilities">Win Probabilities</a></li>
+                        <li class="new-feature"><a href="/api/v1/matches/1/availability">Player Availability</a></li>
+                        <li class="enhanced-feature"><a href="/api/v1/matches/1/players">Player Positions</a></li>
                     </ul>
                 </div>
             </div>
             <div class="section">
-                <h2>Features</h2>
+                <h2>👥 Players & Teams</h2>
                 <div class="endpoint-group">
-                    <h3>Match Details</h3>
+                    <h3>Player Data</h3>
                     <ul>
-                        <li><a href="/api/v1/matches/1/stats">Match Statistics</a></li>
-                        <li><a href="/api/v1/matches/1/commentary">Live Commentary</a></li>
-                        <li><a href="/api/v1/matches/1/locations">Player Locations</a></li>
+                        <li><a href="/api/v1/players">All Players</a></li>
+                        <li><a href="/api/v1/players?position=ST">Strikers</a></li>
+                        <li><a href="/api/v1/players?position=GK">Goalkeepers</a></li>
+                        <li><a href="/api/v1/players?team=1">Team Players</a></li>
+                        <li><a href="/api/v1/players/1">Player Details</a></li>
                     </ul>
                 </div>
                 <div class="endpoint-group">
-                    <h3>Season Information</h3>
+                    <h3>Team Data</h3>
                     <ul>
-                        <li><a href="/api/v1/season/history">Season History</a></li>
-                        <li><a href="/api/v1/season/stats">Season Statistics</a></li>
-                        <li><a href="/api/v1/season/schedule/Premier%20League">Premier League Schedule</a></li>
-                        <li><a href="/api/v1/season/schedule/La%20Liga">La Liga Schedule</a></li>
-                        <li><a href="/api/v1/matchday/1">Matchday Schedule</a></li>
+                        <li><a href="/api/v1/teams">All Teams</a></li>
+                        <li><a href="/api/v1/teams?league=Premier%20League">Premier League Teams</a></li>
+                        <li><a href="/api/v1/teams?league=La%20Liga">Community League Teams</a></li>
+                        <li><a href="/api/v1/teams/1">Team Details</a></li>
+                        <li><a href="/api/v1/teams/1/form">Team Form</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="section">
+                <h2>🏆 League & Season</h2>
+                <div class="endpoint-group">
+                    <h3>League Tables</h3>
+                    <ul>
+                        <li><a href="/api/v1/leagues/Premier%20League/table">Premier League Table</a></li>
+                        <li><a href="/api/v1/leagues/La%20Liga/table">Community League Table</a></li>
+                        <li><a href="/api/v1/leagues/Premier%20League/form">Premier League Form</a></li>
+                        <li><a href="/api/v1/leagues/La%20Liga/form">Community League Form</a></li>
+                        <li><a href="/api/v1/leagues/Premier%20League/schedule">Premier League Schedule</a></li>
                     </ul>
                 </div>
                 <div class="endpoint-group">
-                    <h3>Search & Stats</h3>
+                    <h3>Season Management</h3>
                     <ul>
-                        <li><a href="/api/v1/search?q=manchester">Search API</a></li>
-                        <li><a href="/api/v1/global-stats">Global Statistics</a></li>
+                        <li><a href="/api/v1/seasons/current">Current Season</a></li>
+                        <li><a href="/api/v1/seasons/history">Season History</a></li>
+                        <li><a href="/api/v1/seasons/current/matchdays/1">Matchday 1</a></li>
+                        <li><a href="/api/v1/seasons/current/matchdays/{{.CurrentMatchweek}}">Current Matchday</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="section">
+                <h2>🔧 System & Utilities</h2>
+                <div class="endpoint-group">
+                    <h3>System Status</h3>
+                    <ul>
                         <li><a href="/api/v1/health">Health Check</a></li>
+                        <li><a href="/api/v1/stats">Global Statistics</a></li>
+                        <li><a href="/api/v1/search?q=Johnson">Search API</a></li>
                     </ul>
                 </div>
                 <div class="endpoint-group">
-                    <h3>Data Tables</h3>
+                    <h3>Data Tables (HTML)</h3>
                     <ul>
                         <li><a href="/tables?type=matches">Matches Table</a></li>
                         <li><a href="/tables?type=teams">Teams Table</a></li>
@@ -1862,6 +2647,12 @@ func serveHomepage(w http.ResponseWriter, r *http.Request) {
                     </ul>
                 </div>
             </div>
+        </div>
+        <div class="footer">
+            <p><strong>🚀 New Features:</strong> Real-time momentum tracking • Dynamic match probabilities • Player availability system • Enhanced red card handling</p>
+            <p><strong>API Version:</strong> v{{.Version}} | <strong>Last Updated:</strong> {{.LastUpdated}}</p>
+            <a href="/api-schema.txt" class="api-schema-link">Download API Schema</a>
+            <a href="https://github.com/tobimadehin/matchpulse-api" class="github-link">View on GitHub</a>
         </div>
     </div>
 </body>
@@ -2250,8 +3041,6 @@ func getTeamForm(w http.ResponseWriter, r *http.Request) {
 		"league":      team.League,
 		"form":        team.Form,
 		"form_points": team.FormPoints,
-		"home_streak": team.HomeStreak,
-		"away_streak": team.AwayStreak,
 		"timestamp":   time.Now(),
 	}
 
@@ -2295,8 +3084,6 @@ func getLeagueForm(w http.ResponseWriter, r *http.Request) {
 			"short_name":  team.ShortName,
 			"form":        team.Form,
 			"form_points": team.FormPoints,
-			"home_streak": team.HomeStreak,
-			"away_streak": team.AwayStreak,
 		}
 	}
 
@@ -2339,6 +3126,798 @@ func getMatchdaySchedule(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Missing function implementations
+
+func getMatchTactics(matchID int) *MatchTactics {
+	if tactics, exists := matchTactics[matchID]; exists {
+		return tactics
+	}
+
+	// Generate random tactics if not exists
+	offensiveTactics := []string{TacticTikiTaka, TacticCounterAttack, TacticDirectPlay, TacticWingPlay, TacticPressing}
+	defensiveTactics := []string{TacticCompactDefense, TacticManMarking, TacticZonalMarking, TacticOffside, TacticLowBlock}
+
+	tactics := &MatchTactics{
+		HomeOffensive: offensiveTactics[rand.Intn(len(offensiveTactics))],
+		HomeDefensive: defensiveTactics[rand.Intn(len(defensiveTactics))],
+		AwayOffensive: offensiveTactics[rand.Intn(len(offensiveTactics))],
+		AwayDefensive: defensiveTactics[rand.Intn(len(defensiveTactics))],
+	}
+
+	matchTactics[matchID] = tactics
+	return tactics
+}
+
+func setBallEvent(matchID int, eventType string, x, y float64, possessorID int) {
+	if ball := ballPositions[matchID]; ball != nil {
+		ball.X = x
+		ball.Y = y
+		ball.PossessorID = possessorID
+		ball.EventType = eventType
+		ball.EventStarted = time.Now()
+		ball.Speed = 0
+		ball.Timestamp = time.Now()
+
+		// Reposition players for the event
+		repositionPlayersForEvent(matchID, eventType, x, y)
+	}
+}
+
+func repositionPlayersForEvent(matchID int, eventType string, ballX, ballY float64) {
+	match := matches[matchID]
+	if match == nil {
+		return
+	}
+
+	switch eventType {
+	case BallEventKickoff:
+		repositionForKickoff(matchID, match)
+	case BallEventCorner:
+		repositionForCorner(matchID, match, ballX, ballY)
+	case BallEventFreekick:
+		repositionForFreekick(matchID, match, ballX, ballY)
+	case BallEventThrowIn:
+		repositionForThrowIn(matchID, match, ballX, ballY)
+	case BallEventPenalty:
+		repositionForPenalty(matchID, match, ballX, ballY)
+	case BallEventGoalkick:
+		repositionForGoalkick(matchID, match, ballX, ballY)
+	}
+}
+
+func repositionForKickoff(matchID int, match *Match) {
+	// Reset to formation positions
+	homePositions := getFormationPositions(match.HomeFormation, true)
+	awayPositions := getFormationPositions(match.AwayFormation, false)
+
+	homePlayers := getPlayersFromTeam(match.HomeTeam.ID)[:11]
+	awayPlayers := getPlayersFromTeam(match.AwayTeam.ID)[:11]
+
+	// Position home team
+	for i, player := range homePlayers {
+		if i < len(homePositions) {
+			playerLocations[matchID][player.ID] = &PlayerLocation{
+				PlayerID:  player.ID,
+				X:         homePositions[i].X,
+				Y:         homePositions[i].Y,
+				Timestamp: time.Now(),
+			}
+		}
+	}
+
+	// Position away team
+	for i, player := range awayPlayers {
+		if i < len(awayPositions) {
+			playerLocations[matchID][player.ID] = &PlayerLocation{
+				PlayerID:  player.ID,
+				X:         awayPositions[i].X,
+				Y:         awayPositions[i].Y,
+				Timestamp: time.Now(),
+			}
+		}
+	}
+}
+
+func repositionForCorner(matchID int, match *Match, ballX, ballY float64) {
+	isHomeCorner := ballX > FieldWidth/2
+
+	if isHomeCorner {
+		// Home team attacking corner
+		repositionTeamForAttackingCorner(matchID, match.HomeTeam.ID, ballX, ballY)
+		repositionTeamForDefendingCorner(matchID, match.AwayTeam.ID, ballX, ballY)
+	} else {
+		// Away team attacking corner
+		repositionTeamForAttackingCorner(matchID, match.AwayTeam.ID, ballX, ballY)
+		repositionTeamForDefendingCorner(matchID, match.HomeTeam.ID, ballX, ballY)
+	}
+}
+
+func repositionTeamForAttackingCorner(matchID int, teamID int, ballX, ballY float64) {
+	players := getPlayersFromTeam(teamID)[:11]
+	goalX := FieldWidth
+	if ballX < FieldWidth/2 {
+		goalX = 0
+	}
+
+	for i, player := range players {
+		var x, y float64
+
+		switch player.Position {
+		case PosLW, PosRW, PosCM:
+			if i == 0 { // Corner taker
+				x, y = ballX, ballY
+			} else {
+				// Position in penalty area
+				x = goalX - 10 + rand.Float64()*15
+				y = FieldHeight/2 - 10 + rand.Float64()*20
+			}
+		case PosST, PosCAM:
+			// Position near goal
+			x = goalX - 8 + rand.Float64()*12
+			y = FieldHeight/2 - 8 + rand.Float64()*16
+		case PosCDM, PosCB:
+			// Stay back for defensive cover
+			x = FieldWidth/2 - 10 + rand.Float64()*20
+			y = FieldHeight/2 - 15 + rand.Float64()*30
+		case PosGK:
+			// Stay in goal
+			x = goalX - FieldWidth + 5
+			y = FieldHeight / 2
+		default:
+			// Default positioning
+			x = goalX - 15 + rand.Float64()*20
+			y = FieldHeight/2 - 12 + rand.Float64()*24
+		}
+
+		playerLocations[matchID][player.ID] = &PlayerLocation{
+			PlayerID:  player.ID,
+			X:         math.Max(0, math.Min(FieldWidth, x)),
+			Y:         math.Max(0, math.Min(FieldHeight, y)),
+			Timestamp: time.Now(),
+		}
+	}
+}
+
+func repositionTeamForDefendingCorner(matchID int, teamID int, ballX, ballY float64) {
+	players := getPlayersFromTeam(teamID)[:11]
+	goalX := 0.0
+	if ballX < FieldWidth/2 {
+		goalX = FieldWidth
+	}
+
+	for _, player := range players {
+		var x, y float64
+
+		switch player.Position {
+		case PosGK:
+			// Stay in goal
+			x = goalX + 5
+			if goalX == 0 {
+				x = 5
+			} else {
+				x = FieldWidth - 5
+			}
+			y = FieldHeight / 2
+		case PosCB, PosLB, PosRB:
+			// Mark attackers in penalty area
+			x = goalX + 8 + rand.Float64()*8
+			if goalX == 0 {
+				x = 8 + rand.Float64()*8
+			} else {
+				x = FieldWidth - 16 + rand.Float64()*8
+			}
+			y = FieldHeight/2 - 12 + rand.Float64()*24
+		case PosCDM, PosCM:
+			// Cover edge of penalty area
+			x = goalX + 18 + rand.Float64()*8
+			if goalX == 0 {
+				x = 18 + rand.Float64()*8
+			} else {
+				x = FieldWidth - 26 + rand.Float64()*8
+			}
+			y = FieldHeight/2 - 15 + rand.Float64()*30
+		default:
+			// Stay back defensively
+			x = goalX + 15 + rand.Float64()*10
+			if goalX == 0 {
+				x = 15 + rand.Float64()*10
+			} else {
+				x = FieldWidth - 25 + rand.Float64()*10
+			}
+			y = FieldHeight/2 - 20 + rand.Float64()*40
+		}
+
+		playerLocations[matchID][player.ID] = &PlayerLocation{
+			PlayerID:  player.ID,
+			X:         math.Max(0, math.Min(FieldWidth, x)),
+			Y:         math.Max(0, math.Min(FieldHeight, y)),
+			Timestamp: time.Now(),
+		}
+	}
+}
+
+func repositionForFreekick(matchID int, match *Match, ballX, ballY float64) {
+	// Determine attacking/defending teams based on ball position
+	isHomeAttacking := ballX > FieldWidth/2
+	var attackingTeamID, defendingTeamID int
+
+	if isHomeAttacking {
+		attackingTeamID = match.HomeTeam.ID
+		defendingTeamID = match.AwayTeam.ID
+	} else {
+		attackingTeamID = match.AwayTeam.ID
+		defendingTeamID = match.HomeTeam.ID
+	}
+
+	// Position attacking team
+	attackingPlayers := getPlayersFromTeam(attackingTeamID)[:11]
+	for i, player := range attackingPlayers {
+		var x, y float64
+
+		if i == 0 { // Free kick taker
+			x, y = ballX, ballY
+		} else if player.Position == PosST || player.Position == PosCAM {
+			// Position for potential shot/cross
+			goalX := FieldWidth
+			if ballX < FieldWidth/2 {
+				goalX = 0
+			}
+			x = goalX - 15 + rand.Float64()*10
+			y = FieldHeight/2 - 8 + rand.Float64()*16
+		} else {
+			// Support positions
+			x = ballX - 20 + rand.Float64()*15
+			y = ballY - 10 + rand.Float64()*20
+		}
+
+		playerLocations[matchID][player.ID] = &PlayerLocation{
+			PlayerID:  player.ID,
+			X:         math.Max(0, math.Min(FieldWidth, x)),
+			Y:         math.Max(0, math.Min(FieldHeight, y)),
+			Timestamp: time.Now(),
+		}
+	}
+
+	// Position defending team (wall + coverage)
+	defendingPlayers := getPlayersFromTeam(defendingTeamID)[:11]
+	wallDistance := 9.15 // FIFA regulation 10 yards
+
+	for i, player := range defendingPlayers {
+		var x, y float64
+
+		if player.Position == PosGK {
+			// Goalkeeper positioning
+			goalX := 0.0
+			if ballX < FieldWidth/2 {
+				goalX = FieldWidth
+			}
+			x = goalX + 5.0
+			if goalX == 0 {
+				x = 5
+			} else {
+				x = FieldWidth - 5
+			}
+			y = FieldHeight / 2
+		} else if i < 4 { // Wall players
+			angle := math.Atan2(FieldHeight/2-ballY, (FieldWidth/2)-ballX)
+			x = ballX + math.Cos(angle)*wallDistance
+			y = ballY + math.Sin(angle)*wallDistance + float64(i-2)*2
+		} else {
+			// Mark attackers
+			x = ballX + 10 + rand.Float64()*20
+			y = ballY - 15 + rand.Float64()*30
+		}
+
+		playerLocations[matchID][player.ID] = &PlayerLocation{
+			PlayerID:  player.ID,
+			X:         math.Max(0, math.Min(FieldWidth, x)),
+			Y:         math.Max(0, math.Min(FieldHeight, y)),
+			Timestamp: time.Now(),
+		}
+	}
+}
+
+func repositionForThrowIn(matchID int, match *Match, ballX, ballY float64) {
+	// Simple repositioning - players spread out along the line
+	allPlayers := append(getPlayersFromTeam(match.HomeTeam.ID)[:11], getPlayersFromTeam(match.AwayTeam.ID)[:11]...)
+
+	for i, player := range allPlayers {
+		x := ballX - 10 + rand.Float64()*20
+		y := ballY + float64(i-11)*3 // Spread along the line
+
+		playerLocations[matchID][player.ID] = &PlayerLocation{
+			PlayerID:  player.ID,
+			X:         math.Max(0, math.Min(FieldWidth, x)),
+			Y:         math.Max(0, math.Min(FieldHeight, y)),
+			Timestamp: time.Now(),
+		}
+	}
+}
+
+func repositionForPenalty(matchID int, match *Match, ballX, ballY float64) {
+	// Position all players outside penalty area except penalty taker and goalkeeper
+	allPlayers := append(getPlayersFromTeam(match.HomeTeam.ID)[:11], getPlayersFromTeam(match.AwayTeam.ID)[:11]...)
+
+	for i, player := range allPlayers {
+		var x, y float64
+
+		if player.Position == PosGK {
+			// Goalkeeper on goal line
+			goalX := 0.0
+			if ballX > FieldWidth/2 {
+				goalX = FieldWidth
+			}
+			x = goalX + 2.0
+			if goalX == 0 {
+				x = 2
+			} else {
+				x = FieldWidth - 2
+			}
+			y = FieldHeight / 2
+		} else if i == 0 { // Penalty taker
+			x, y = ballX, ballY
+		} else {
+			// Outside penalty area
+			x = ballX - 20 + rand.Float64()*40
+			y = ballY - 20 + rand.Float64()*40
+		}
+
+		playerLocations[matchID][player.ID] = &PlayerLocation{
+			PlayerID:  player.ID,
+			X:         math.Max(0, math.Min(FieldWidth, x)),
+			Y:         math.Max(0, math.Min(FieldHeight, y)),
+			Timestamp: time.Now(),
+		}
+	}
+}
+
+func repositionForGoalkick(matchID int, match *Match, ballX, ballY float64) {
+	// Players spread out to receive goal kick
+	allPlayers := append(getPlayersFromTeam(match.HomeTeam.ID)[:11], getPlayersFromTeam(match.AwayTeam.ID)[:11]...)
+
+	for _, player := range allPlayers {
+		var x, y float64
+
+		if player.Position == PosGK {
+			x, y = ballX, ballY
+		} else {
+			// Spread across the field
+			x = 20 + rand.Float64()*(FieldWidth-40)
+			y = 10 + rand.Float64()*(FieldHeight-20)
+		}
+
+		playerLocations[matchID][player.ID] = &PlayerLocation{
+			PlayerID:  player.ID,
+			X:         x,
+			Y:         y,
+			Timestamp: time.Now(),
+		}
+	}
+}
+
+func updateBallPhysics(matchID int, ball *BallPosition) {
+	if ball == nil {
+		return
+	}
+
+	// Handle ball movement based on current event type
+	switch ball.EventType {
+	case BallEventPlay:
+		updateBallInPlay(matchID, ball)
+	case BallEventKickoff:
+		handleKickoffBallEvent(matchID, ball)
+	case BallEventFreekick:
+		handleFreekickBallEvent(matchID, ball)
+	case BallEventCorner:
+		handleCornerBallEvent(matchID, ball)
+	case BallEventThrowIn:
+		handleThrowInBallEvent(matchID, ball)
+	case BallEventPenalty:
+		handlePenaltyBallEvent(matchID, ball)
+	case BallEventGoalkick:
+		handleGoalkickBallEvent(matchID, ball)
+	default:
+		updateBallInPlay(matchID, ball)
+	}
+
+	ball.Timestamp = time.Now()
+}
+
+func updateBallInPlay(matchID int, ball *BallPosition) {
+	if ball.PossessorID > 0 {
+		// Ball follows player with possession
+		if location, exists := playerLocations[matchID][ball.PossessorID]; exists {
+			ball.X = location.X + (rand.Float64()-0.5)*3
+			ball.Y = location.Y + (rand.Float64()-0.5)*3
+
+			// Simulate passing - change possession occasionally
+			if rand.Float64() < 0.1 { // 10% chance per update
+				simulatePass(matchID, ball)
+			}
+		}
+	} else {
+		// Ball moves with physics when loose
+		ball.Speed *= 0.92 // Friction
+		ball.X += math.Cos(ball.Direction) * ball.Speed
+		ball.Y += math.Sin(ball.Direction) * ball.Speed
+
+		// Check if any player can pick up the ball
+		if ball.Speed < 1.0 {
+			nearestPlayer := findNearestPlayerToBall(matchID, ball)
+			if nearestPlayer != nil {
+				ball.LastTouchID = ball.PossessorID
+				ball.PossessorID = nearestPlayer.ID
+			}
+		}
+	}
+
+	// Keep within bounds
+	ball.X = math.Max(0, math.Min(FieldWidth, ball.X))
+	ball.Y = math.Max(0, math.Min(FieldHeight, ball.Y))
+
+	// Check for out of bounds events
+	checkBallOutOfBounds(matchID, ball)
+}
+
+func simulatePass(matchID int, ball *BallPosition) {
+	if ball.PossessorID == 0 {
+		return
+	}
+
+	possessor, exists := players[ball.PossessorID]
+	if !exists {
+		return
+	}
+
+	// Find teammates for passing
+	teammates := getTeammates(matchID, possessor.TeamID, ball.PossessorID)
+	if len(teammates) == 0 {
+		return
+	}
+
+	// Simple pass to random teammate
+	target := teammates[rand.Intn(len(teammates))]
+	if location, exists := playerLocations[matchID][target.ID]; exists {
+		// Set ball direction toward target
+		ball.Direction = math.Atan2(location.Y-ball.Y, location.X-ball.X)
+		ball.Speed = 8.0 + rand.Float64()*4.0
+		ball.LastTouchID = ball.PossessorID
+		ball.PossessorID = 0 // Ball is in the air
+	}
+}
+
+func findNearestPlayerToBall(matchID int, ball *BallPosition) *Player {
+	var nearestPlayer *Player
+	minDistance := 5.0 // Must be within 5 units
+
+	if locations, exists := playerLocations[matchID]; exists {
+		for playerID, location := range locations {
+			distance := math.Sqrt(math.Pow(location.X-ball.X, 2) + math.Pow(location.Y-ball.Y, 2))
+			if distance < minDistance {
+				if player, exists := players[playerID]; exists {
+					minDistance = distance
+					nearestPlayer = player
+				}
+			}
+		}
+	}
+
+	return nearestPlayer
+}
+
+func getTeammates(matchID int, teamID, excludePlayerID int) []*Player {
+	var teammates []*Player
+
+	if locations, exists := playerLocations[matchID]; exists {
+		for playerID := range locations {
+			if player, exists := players[playerID]; exists {
+				if player.TeamID == teamID && player.ID != excludePlayerID {
+					teammates = append(teammates, player)
+				}
+			}
+		}
+	}
+
+	return teammates
+}
+
+func checkBallOutOfBounds(matchID int, ball *BallPosition) {
+	match := matches[matchID]
+	if match == nil {
+		return
+	}
+
+	// Check for corner kicks
+	if (ball.X <= 0 || ball.X >= FieldWidth) && (ball.Y >= 0 && ball.Y <= FieldHeight) {
+		// Determine which team gets the corner/goal kick
+		isHomeAttack := ball.X >= FieldWidth/2
+
+		if ball.Y <= 5 || ball.Y >= FieldHeight-5 { // Near goal line
+			if isHomeAttack {
+				setBallEvent(matchID, BallEventCorner, FieldWidth-1, ball.Y, 0)
+				addLiveCommentary(matchID, match.Minute, "Corner kick!", EventCorner, nil)
+			} else {
+				setBallEvent(matchID, BallEventGoalkick, 6, FieldHeight/2, 0)
+				addLiveCommentary(matchID, match.Minute, "Goal kick", EventCommentary, nil)
+			}
+		}
+	}
+
+	// Check for throw-ins
+	if ball.Y <= 0 || ball.Y >= FieldHeight {
+		throwY := math.Max(1, math.Min(FieldHeight-1, ball.Y))
+		setBallEvent(matchID, BallEventThrowIn, ball.X, throwY, 0)
+		addLiveCommentary(matchID, match.Minute, "Throw-in", EventCommentary, nil)
+	}
+}
+
+func handleKickoffBallEvent(matchID int, ball *BallPosition) {
+	// Wait 3 seconds then start play
+	if time.Since(ball.EventStarted) > 3*time.Second {
+		// Find center midfielder to take kickoff
+		match := matches[matchID]
+		if match != nil {
+			teamPlayers := getPlayersFromTeam(match.HomeTeam.ID)
+			for _, player := range teamPlayers {
+				if player.Position == PosCM {
+					ball.PossessorID = player.ID
+					ball.EventType = BallEventPlay
+					break
+				}
+			}
+		}
+	}
+}
+
+func handleFreekickBallEvent(matchID int, ball *BallPosition) {
+	// Wait 2 seconds then take free kick
+	if time.Since(ball.EventStarted) > 2*time.Second {
+		nearestPlayer := findNearestPlayerToBall(matchID, ball)
+		if nearestPlayer != nil {
+			ball.PossessorID = nearestPlayer.ID
+			ball.EventType = BallEventPlay
+
+			// Simulate free kick
+			ball.Direction = rand.Float64() * 2 * math.Pi
+			ball.Speed = 6.0 + rand.Float64()*8.0
+		}
+	}
+}
+
+func handleCornerBallEvent(matchID int, ball *BallPosition) {
+	// Wait 3 seconds then take corner
+	if time.Since(ball.EventStarted) > 3*time.Second {
+		// Find winger or midfielder to take corner
+		match := matches[matchID]
+		if match != nil {
+			isHomeCorner := ball.X > FieldWidth/2
+			var teamID int
+			if isHomeCorner {
+				teamID = match.HomeTeam.ID
+			} else {
+				teamID = match.AwayTeam.ID
+			}
+
+			teamPlayers := getPlayersFromTeam(teamID)
+			for _, player := range teamPlayers {
+				if player.Position == PosLW || player.Position == PosRW || player.Position == PosCM {
+					ball.PossessorID = player.ID
+					ball.EventType = BallEventPlay
+
+					// Aim toward goal area
+					goalY := FieldHeight / 2
+					ball.Direction = math.Atan2(goalY-ball.Y, (FieldWidth/2)-ball.X)
+					ball.Speed = 8.0 + rand.Float64()*4.0
+					break
+				}
+			}
+		}
+	}
+}
+
+func handleThrowInBallEvent(matchID int, ball *BallPosition) {
+	// Wait 2 seconds then take throw-in
+	if time.Since(ball.EventStarted) > 2*time.Second {
+		nearestPlayer := findNearestPlayerToBall(matchID, ball)
+		if nearestPlayer != nil {
+			ball.PossessorID = nearestPlayer.ID
+			ball.EventType = BallEventPlay
+		}
+	}
+}
+
+func handlePenaltyBallEvent(matchID int, ball *BallPosition) {
+	// Wait 5 seconds then take penalty
+	if time.Since(ball.EventStarted) > 5*time.Second {
+		// Find striker to take penalty
+		match := matches[matchID]
+		if match != nil {
+			isHomePenalty := ball.X > FieldWidth/2
+			var teamID int
+			if isHomePenalty {
+				teamID = match.HomeTeam.ID
+			} else {
+				teamID = match.AwayTeam.ID
+			}
+
+			teamPlayers := getPlayersFromTeam(teamID)
+			for _, player := range teamPlayers {
+				if player.Position == PosST {
+					ball.PossessorID = player.ID
+					ball.EventType = BallEventPlay
+
+					// High chance of goal on penalty
+					if rand.Float64() < 0.8 {
+						// Simulate goal
+						handleGoalEvent(matchID, match)
+					} else {
+						// Miss - ball goes to keeper
+						ball.Direction = math.Atan2((FieldHeight/2)-ball.Y, 0-ball.X)
+						ball.Speed = 10.0
+					}
+					break
+				}
+			}
+		}
+	}
+}
+
+func handleGoalkickBallEvent(matchID int, ball *BallPosition) {
+	// Wait 2 seconds then take goal kick
+	if time.Since(ball.EventStarted) > 2*time.Second {
+		match := matches[matchID]
+		if match != nil {
+			// Find goalkeeper
+			isHomeGoalkick := ball.X < FieldWidth/2
+			var teamID int
+			if isHomeGoalkick {
+				teamID = match.HomeTeam.ID
+			} else {
+				teamID = match.AwayTeam.ID
+			}
+
+			teamPlayers := getPlayersFromTeam(teamID)
+			for _, player := range teamPlayers {
+				if player.Position == PosGK {
+					ball.PossessorID = player.ID
+					ball.EventType = BallEventPlay
+
+					// Long kick upfield
+					ball.Direction = math.Atan2(0, FieldWidth-ball.X)
+					ball.Speed = 12.0 + rand.Float64()*8.0
+					break
+				}
+			}
+		}
+	}
+}
+
+func getFormationPositions(formation string, isHome bool) []FormationPosition {
+	var positions []FormationPosition
+
+	switch formation {
+	case Formation442:
+		positions = get442Formation(isHome)
+	case Formation433:
+		positions = get433Formation(isHome)
+	case Formation352:
+		positions = get352Formation(isHome)
+	case Formation4231:
+		positions = get4231Formation(isHome)
+	case Formation532:
+		positions = get532Formation(isHome)
+	default:
+		positions = get442Formation(isHome)
+	}
+
+	return positions
+}
+
+func get442Formation(isHome bool) []FormationPosition {
+	baseX := 20.0
+	if !isHome {
+		baseX = 80.0
+	}
+
+	return []FormationPosition{
+		{baseX - 15, FieldHeight / 2},    // GK
+		{baseX, FieldHeight * 0.2},       // CB
+		{baseX, FieldHeight * 0.8},       // CB
+		{baseX + 5, FieldHeight * 0.1},   // LB
+		{baseX + 5, FieldHeight * 0.9},   // RB
+		{baseX + 20, FieldHeight * 0.25}, // CM
+		{baseX + 20, FieldHeight * 0.45}, // CM
+		{baseX + 20, FieldHeight * 0.55}, // CM
+		{baseX + 20, FieldHeight * 0.75}, // CM
+		{baseX + 35, FieldHeight * 0.35}, // ST
+		{baseX + 35, FieldHeight * 0.65}, // ST
+	}
+}
+
+func get433Formation(isHome bool) []FormationPosition {
+	baseX := 20.0
+	if !isHome {
+		baseX = 80.0
+	}
+
+	return []FormationPosition{
+		{baseX - 15, FieldHeight / 2},   // GK
+		{baseX, FieldHeight * 0.2},      // CB
+		{baseX, FieldHeight * 0.5},      // CB
+		{baseX, FieldHeight * 0.8},      // CB
+		{baseX + 5, FieldHeight * 0.1},  // LB
+		{baseX + 5, FieldHeight * 0.9},  // RB
+		{baseX + 20, FieldHeight * 0.3}, // CM
+		{baseX + 20, FieldHeight * 0.5}, // CM
+		{baseX + 20, FieldHeight * 0.7}, // CM
+		{baseX + 35, FieldHeight * 0.2}, // LW
+		{baseX + 35, FieldHeight * 0.5}, // ST
+	}
+}
+
+func get352Formation(isHome bool) []FormationPosition {
+	baseX := 20.0
+	if !isHome {
+		baseX = 80.0
+	}
+
+	return []FormationPosition{
+		{baseX - 15, FieldHeight / 2},   // GK
+		{baseX, FieldHeight * 0.25},     // CB
+		{baseX, FieldHeight * 0.5},      // CB
+		{baseX, FieldHeight * 0.75},     // CB
+		{baseX + 15, FieldHeight * 0.1}, // LWB
+		{baseX + 15, FieldHeight * 0.3}, // CM
+		{baseX + 15, FieldHeight * 0.5}, // CM
+		{baseX + 15, FieldHeight * 0.7}, // CM
+		{baseX + 15, FieldHeight * 0.9}, // RWB
+		{baseX + 35, FieldHeight * 0.4}, // ST
+		{baseX + 35, FieldHeight * 0.6}, // ST
+	}
+}
+
+func get4231Formation(isHome bool) []FormationPosition {
+	baseX := 20.0
+	if !isHome {
+		baseX = 80.0
+	}
+
+	return []FormationPosition{
+		{baseX - 15, FieldHeight / 2},   // GK
+		{baseX, FieldHeight * 0.2},      // CB
+		{baseX, FieldHeight * 0.8},      // CB
+		{baseX + 5, FieldHeight * 0.1},  // LB
+		{baseX + 5, FieldHeight * 0.9},  // RB
+		{baseX + 20, FieldHeight * 0.4}, // CDM
+		{baseX + 20, FieldHeight * 0.6}, // CDM
+		{baseX + 30, FieldHeight * 0.2}, // LW
+		{baseX + 30, FieldHeight * 0.5}, // CAM
+		{baseX + 30, FieldHeight * 0.8}, // RW
+		{baseX + 40, FieldHeight * 0.5}, // ST
+	}
+}
+
+func get532Formation(isHome bool) []FormationPosition {
+	baseX := 20.0
+	if !isHome {
+		baseX = 80.0
+	}
+
+	return []FormationPosition{
+		{baseX - 15, FieldHeight / 2},   // GK
+		{baseX, FieldHeight * 0.15},     // CB
+		{baseX, FieldHeight * 0.35},     // CB
+		{baseX, FieldHeight * 0.5},      // CB
+		{baseX, FieldHeight * 0.65},     // CB
+		{baseX, FieldHeight * 0.85},     // CB
+		{baseX + 20, FieldHeight * 0.3}, // CM
+		{baseX + 20, FieldHeight * 0.5}, // CM
+		{baseX + 20, FieldHeight * 0.7}, // CM
+		{baseX + 35, FieldHeight * 0.4}, // ST
+		{baseX + 35, FieldHeight * 0.6}, // ST
+	}
+}
+
 func main() {
 	// Get port from environment
 	port := os.Getenv("PORT")
@@ -2354,21 +3933,8 @@ func main() {
 	// Create router
 	router := mux.NewRouter()
 
-	// Enable CORS middleware
-	router.Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "*")
-
-			if r.Method == "OPTIONS" {
-				w.WriteHeader(http.StatusOK)
-				return
-			}
-
-			next.ServeHTTP(w, r)
-		})
-	})
+	// Apply CORS
+	router.Use(corsMiddleware)
 
 	// Apply application middleware
 	router.Use(applicationMiddleware)
@@ -2379,39 +3945,58 @@ func main() {
 	// Tables route
 	router.HandleFunc("/tables", getTableData).Methods("GET")
 
-	// API routes
+	// Downloadable API schema file
+	router.PathPrefix("/api-schema.txt").Handler(http.StripPrefix("/", http.FileServer(http.Dir("."))))
+
+	// API routes - RESTful structure
 	apiRouter := router.PathPrefix("/api/v1").Subrouter()
 
-	// Core endpoints
+	// System endpoints
 	apiRouter.HandleFunc("/health", healthCheck).Methods("GET")
-	apiRouter.HandleFunc("/matches", getAllMatches).Methods("GET")
-	apiRouter.HandleFunc("/matches/{id}", getMatch).Methods("GET")
-	apiRouter.HandleFunc("/matches/{id}/stats", getMatchStats).Methods("GET")
-	apiRouter.HandleFunc("/matches/{id}/commentary", getMatchCommentary).Methods("GET")
-	apiRouter.HandleFunc("/matches/{id}/locations", getMatchLocations).Methods("GET")
-	apiRouter.HandleFunc("/global-stats", getGlobalStats).Methods("GET")
-	apiRouter.HandleFunc("/players", getAllPlayers).Methods("GET")
-	apiRouter.HandleFunc("/players/{id}", getPlayer).Methods("GET")
-	apiRouter.HandleFunc("/teams", getAllTeams).Methods("GET")
-	apiRouter.HandleFunc("/teams/{id}", getTeam).Methods("GET")
-	apiRouter.HandleFunc("/teams/{id}/form", getTeamForm).Methods("GET")
-	apiRouter.HandleFunc("/league-table/{league}", getLeagueTable).Methods("GET")
-	apiRouter.HandleFunc("/league/{league}/form", getLeagueForm).Methods("GET")
+	apiRouter.HandleFunc("/stats", getGlobalStats).Methods("GET")
 	apiRouter.HandleFunc("/search", searchAPI).Methods("GET")
-	apiRouter.HandleFunc("/season/history", getSeasonHistory).Methods("GET")
-	apiRouter.HandleFunc("/season/stats", getSeasonStats).Methods("GET")
-	apiRouter.HandleFunc("/season/schedule/{league}", getSeasonSchedule).Methods("GET")
-	apiRouter.HandleFunc("/matchday/{matchday}", getMatchdaySchedule).Methods("GET")
+
+	// Match endpoints
+	apiRouter.HandleFunc("/matches", getAllMatches).Methods("GET")
+	apiRouter.HandleFunc("/matches/{id:[0-9]+}", getMatch).Methods("GET")
+	apiRouter.HandleFunc("/matches/{id:[0-9]+}/stats", getMatchStats).Methods("GET")
+	apiRouter.HandleFunc("/matches/{id:[0-9]+}/commentary", getMatchCommentary).Methods("GET")
+	apiRouter.HandleFunc("/matches/{id:[0-9]+}/players", getMatchLocations).Methods("GET")
+	apiRouter.HandleFunc("/matches/{id:[0-9]+}/momentum", getMatchMomentum).Methods("GET")
+	apiRouter.HandleFunc("/matches/{id:[0-9]+}/probabilities", getMatchProbabilities).Methods("GET")
+	apiRouter.HandleFunc("/matches/{id:[0-9]+}/availability", getMatchAvailability).Methods("GET")
+
+	// Player endpoints
+	apiRouter.HandleFunc("/players", getAllPlayers).Methods("GET")
+	apiRouter.HandleFunc("/players/{id:[0-9]+}", getPlayer).Methods("GET")
+
+	// Team endpoints
+	apiRouter.HandleFunc("/teams", getAllTeams).Methods("GET")
+	apiRouter.HandleFunc("/teams/{id:[0-9]+}", getTeam).Methods("GET")
+	apiRouter.HandleFunc("/teams/{id:[0-9]+}/form", getTeamForm).Methods("GET")
+
+	// League endpoints
+	apiRouter.HandleFunc("/leagues/{league}/table", getLeagueTable).Methods("GET")
+	apiRouter.HandleFunc("/leagues/{league}/form", getLeagueForm).Methods("GET")
+	apiRouter.HandleFunc("/leagues/{league}/schedule", getSeasonSchedule).Methods("GET")
+
+	// Season endpoints
+	apiRouter.HandleFunc("/seasons/current", getSeasonStats).Methods("GET")
+	apiRouter.HandleFunc("/seasons/history", getSeasonHistory).Methods("GET")
+	apiRouter.HandleFunc("/seasons/current/matchdays/{matchday:[0-9]+}", getMatchdaySchedule).Methods("GET")
 
 	// Print startup information
 	fmt.Printf("🚀 MatchPulse API v%s starting on port %s\n", version, port)
-	fmt.Printf("⚽ Live matches: %s/api/v1/matches\n", baseURL)
-	fmt.Printf("📍 Player locations: %s/api/v1/matches/1/locations\n", baseURL)
-	fmt.Printf("🏆 Season history: %s/api/v1/season/history\n", baseURL)
-	fmt.Printf("📈 Season stats: %s/api/v1/season/stats\n", baseURL)
-	fmt.Printf("📅 Season schedule: %s/api/v1/season/schedule/Premier%%20League\n", baseURL)
-	fmt.Printf("📊 Team form: %s/api/v1/teams/1/form\n", baseURL)
-	fmt.Printf("🏅 League form table: %s/api/v1/league/Premier%%20League/form\n", baseURL)
+	fmt.Printf("📚 API Documentation: %s/\n", baseURL)
+	fmt.Printf("🏥 Health Check: %s/api/v1/health\n", baseURL)
+	fmt.Printf("⚽ Live Matches: %s/api/v1/matches\n", baseURL)
+	fmt.Printf("📊 Match Details: %s/api/v1/matches/1\n", baseURL)
+	fmt.Printf("⚡ Match Momentum: %s/api/v1/matches/1/momentum\n", baseURL)
+	fmt.Printf("🎲 Match Probabilities: %s/api/v1/matches/1/probabilities\n", baseURL)
+	fmt.Printf("👥 Player Availability: %s/api/v1/matches/1/availability\n", baseURL)
+	fmt.Printf("🏆 Season History: %s/api/v1/seasons/history\n", baseURL)
+	fmt.Printf("📈 Current Season: %s/api/v1/seasons/current\n", baseURL)
+	fmt.Printf("🏅 League Table: %s/api/v1/leagues/Premier%%20League/table\n", baseURL)
 
 	// Start server
 	log.Fatal(http.ListenAndServe("0.0.0.0:"+port, router))
@@ -2468,13 +4053,24 @@ func finishMatch(matchID int, match *Match) {
 
 func handleCornerEvent(matchID int, match *Match) {
 	isHomeCorner := rand.Float32() < 0.5
-	teamName := match.AwayTeam.Name
+	var teamName string
+	var teamID int
+
 	if isHomeCorner {
 		teamName = match.HomeTeam.Name
+		teamID = match.HomeTeam.ID
 		matchStats[matchID].HomeCorners++
 	} else {
+		teamName = match.AwayTeam.Name
+		teamID = match.AwayTeam.ID
 		matchStats[matchID].AwayCorners++
 	}
+
+	// Update momentum - corners create pressure
+	updateMatchMomentum(matchID, match, "corner", teamID)
+
+	// Recalculate probabilities as corners can lead to goals
+	recalculateMatchProbabilities(matchID, match)
 
 	log.Printf("⚽ Corner kick for %s in match %d", teamName, matchID)
 	addLiveCommentary(matchID, match.Minute,
@@ -2483,22 +4079,239 @@ func handleCornerEvent(matchID int, match *Match) {
 }
 
 func handleFoulEvent(matchID int, match *Match) {
-	isHomeFoul := rand.Float32() < 0.5
-	var player *Player
+	ball := ballPositions[matchID]
+	if ball == nil {
+		return
+	}
 
-	if isHomeFoul {
-		player = getRandomPlayerFromTeam(match.HomeTeam.ID)
+	// Find players involved in the action (near the ball)
+	playersNearBall := getPlayersNearAction(matchID, ball, 8.0)
+	if len(playersNearBall) < 2 {
+		return // Need at least 2 players for a foul
+	}
+
+	// Determine foul context
+	foulContext := determineFoulContext(ball, match)
+
+	// Select fouler based on context and proximity
+	fouler := selectFouler(playersNearBall, ball, foulContext)
+	if fouler == nil {
+		return
+	}
+
+	// Determine foul severity based on context
+	severity := determineFoulSeverity(fouler, ball, foulContext)
+
+	// Apply foul consequences
+	applyFoulConsequences(matchID, match, fouler, ball, severity, foulContext)
+}
+
+func getPlayersNearAction(matchID int, ball *BallPosition, radius float64) []*Player {
+	var nearPlayers []*Player
+
+	if locations, exists := playerLocations[matchID]; exists {
+		for playerID, location := range locations {
+			if player, exists := players[playerID]; exists {
+				distance := math.Sqrt(math.Pow(location.X-ball.X, 2) + math.Pow(location.Y-ball.Y, 2))
+				if distance <= radius {
+					nearPlayers = append(nearPlayers, player)
+				}
+			}
+		}
+	}
+
+	return nearPlayers
+}
+
+type FoulContext struct {
+	IsInPenaltyArea   bool
+	IsNearGoal        bool
+	IsCounterAttack   bool
+	IsDangerousPlay   bool
+	BallPossessorTeam int
+}
+
+func determineFoulContext(ball *BallPosition, match *Match) FoulContext {
+	context := FoulContext{}
+
+	// Check if in penalty area
+	if (ball.X <= 18 && ball.Y >= 20 && ball.Y <= 44) ||
+		(ball.X >= FieldWidth-18 && ball.Y >= 20 && ball.Y <= 44) {
+		context.IsInPenaltyArea = true
+	}
+
+	// Check if near goal
+	distanceToGoal := math.Min(
+		math.Sqrt(math.Pow(ball.X, 2)+math.Pow(ball.Y-FieldHeight/2, 2)),
+		math.Sqrt(math.Pow(ball.X-FieldWidth, 2)+math.Pow(ball.Y-FieldHeight/2, 2)))
+	context.IsNearGoal = distanceToGoal < 25
+
+	// Check for dangerous play (high speed, attacking third)
+	context.IsDangerousPlay = ball.Speed > 8.0 && (ball.X < 30 || ball.X > 70)
+
+	// Determine ball possessor team
+	if ball.PossessorID > 0 {
+		if player, exists := players[ball.PossessorID]; exists {
+			context.BallPossessorTeam = player.TeamID
+		}
+	}
+
+	return context
+}
+
+func selectFouler(candidates []*Player, ball *BallPosition, context FoulContext) *Player {
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	// Weight players by foul likelihood
+	weights := make([]float64, len(candidates))
+
+	for i, player := range candidates {
+		weight := 1.0
+
+		// Defending players more likely to foul
+		if context.BallPossessorTeam != 0 && player.TeamID != context.BallPossessorTeam {
+			weight *= 2.0
+		}
+
+		// Position-based likelihood
+		switch player.Position {
+		case PosCB, PosCDM:
+			weight *= 1.5 // Defenders more likely to foul
+		case PosLB, PosRB:
+			weight *= 1.3
+		case PosCM:
+			weight *= 1.0
+		case PosCAM, PosLW, PosRW:
+			weight *= 0.8
+		case PosST:
+			weight *= 0.6
+		case PosGK:
+			if context.IsInPenaltyArea {
+				weight *= 1.8 // GK fouls in penalty area
+			} else {
+				weight *= 0.1 // GK rarely fouls outside area
+			}
+		}
+
+		// Context-based adjustments
+		if context.IsNearGoal {
+			weight *= 1.4 // More fouls near goal
+		}
+		if context.IsDangerousPlay {
+			weight *= 1.6 // More fouls in dangerous situations
+		}
+
+		weights[i] = weight
+	}
+
+	// Select based on weights
+	totalWeight := 0.0
+	for _, w := range weights {
+		totalWeight += w
+	}
+
+	r := rand.Float64() * totalWeight
+	cumulative := 0.0
+
+	for i, weight := range weights {
+		cumulative += weight
+		if r <= cumulative {
+			return candidates[i]
+		}
+	}
+
+	return candidates[len(candidates)-1]
+}
+
+func determineFoulSeverity(fouler *Player, ball *BallPosition, context FoulContext) string {
+	baseSeverity := "yellow"
+
+	// Penalty area fouls more severe
+	if context.IsInPenaltyArea {
+		if rand.Float64() < 0.3 {
+			baseSeverity = "red"
+		}
+	}
+
+	// Goalkeeper handling outside penalty area
+	if fouler.Position == PosGK && !context.IsInPenaltyArea && ball.Speed > 5.0 {
+		if rand.Float64() < 0.6 {
+			baseSeverity = "red"
+		}
+	}
+
+	// Last man fouls
+	if context.IsNearGoal && fouler.Position == PosCB {
+		if rand.Float64() < 0.4 {
+			baseSeverity = "red"
+		}
+	}
+
+	// Dangerous play
+	if context.IsDangerousPlay && rand.Float64() < 0.25 {
+		baseSeverity = "red"
+	}
+
+	return baseSeverity
+}
+
+func applyFoulConsequences(matchID int, match *Match, fouler *Player, ball *BallPosition, severity string, context FoulContext) {
+	// Update statistics
+	if fouler.TeamID == match.HomeTeam.ID {
 		matchStats[matchID].HomeFouls++
 	} else {
-		player = getRandomPlayerFromTeam(match.AwayTeam.ID)
 		matchStats[matchID].AwayFouls++
 	}
 
-	if player != nil {
-		log.Printf("🦵 Foul committed by %s in match %d", player.Name, matchID)
+	// Apply card
+	if severity == "yellow" {
+		fouler.YellowCards++
+		fouler.SeasonStats.YellowCardsThisSeason++
+		fouler.CurrentRating -= 0.3
+
+		if fouler.TeamID == match.HomeTeam.ID {
+			matchStats[matchID].HomeYellowCards++
+		} else {
+			matchStats[matchID].AwayYellowCards++
+		}
+
+		logInfo("🟨 Yellow card for %s (foul)", fouler.Name)
 		addLiveCommentary(matchID, match.Minute,
-			fmt.Sprintf("Foul committed by %s", player.Name),
-			EventFoul, player)
+			fmt.Sprintf("Yellow card! %s commits a foul", fouler.Name),
+			EventCard, fouler)
+
+	} else if severity == "red" {
+		fouler.RedCards++
+		fouler.SeasonStats.RedCardsThisSeason++
+		fouler.CurrentRating -= 1.5
+
+		if fouler.TeamID == match.HomeTeam.ID {
+			matchStats[matchID].HomeRedCards++
+		} else {
+			matchStats[matchID].AwayRedCards++
+		}
+
+		logInfo("🟥 Red card for %s (serious foul)", fouler.Name)
+		addLiveCommentary(matchID, match.Minute,
+			fmt.Sprintf("RED CARD! %s sent off for serious foul play!", fouler.Name),
+			EventCard, fouler)
+	}
+
+	// Determine restart type
+	if context.IsInPenaltyArea && fouler.TeamID != context.BallPossessorTeam {
+		// Penalty
+		penaltyX := 11.0
+		if ball.X < FieldWidth/2 {
+			penaltyX = FieldWidth - 11.0
+		}
+		setBallEvent(matchID, BallEventPenalty, penaltyX, FieldHeight/2, 0)
+		addLiveCommentary(matchID, match.Minute, "PENALTY!", EventPenalty, nil)
+	} else {
+		// Free kick
+		setBallEvent(matchID, BallEventFreekick, ball.X, ball.Y, 0)
+		addLiveCommentary(matchID, match.Minute, "Free kick awarded", EventFreekick, nil)
 	}
 }
 
@@ -2582,7 +4395,7 @@ func generateAudioSpeed(eventType string) float64 {
 
 func updatePlayerLocationsForMatch(matchID int) {
 	match := matches[matchID]
-	if match == nil {
+	if match == nil || match.Status != StatusLive {
 		return
 	}
 
@@ -2590,44 +4403,74 @@ func updatePlayerLocationsForMatch(matchID int) {
 		playerLocations[matchID] = make(map[int]*PlayerLocation)
 	}
 
-	// Get players from both teams
-	homePlayers := getPlayersFromTeam(match.HomeTeam.ID)
-	awayPlayers := getPlayersFromTeam(match.AwayTeam.ID)
-
-	// Update locations for 11 players from each team (starting lineup)
-	updateTeamLocations(matchID, homePlayers[:min(11, len(homePlayers))], true)
-	updateTeamLocations(matchID, awayPlayers[:min(11, len(awayPlayers))], false)
-}
-
-func updateTeamLocations(matchID int, teamPlayers []*Player, isHome bool) {
-	match := matches[matchID]
-	if match == nil {
-		return
+	// Initialize ball if not exists
+	if ballPositions[matchID] == nil {
+		ballPositions[matchID] = &BallPosition{
+			X:            FieldWidth / 2,
+			Y:            FieldHeight / 2,
+			EventType:    BallEventKickoff,
+			EventStarted: time.Now(),
+			Timestamp:    time.Now(),
+		}
 	}
 
+	ball := ballPositions[matchID]
+
+	// Get match tactics
+	tactics := getMatchTactics(matchID)
+
+	// Determine possession (home team has ball if possessor is from home team)
+	homePossession := false
+	if ball.PossessorID > 0 {
+		if player, exists := players[ball.PossessorID]; exists {
+			homePossession = player.TeamID == match.HomeTeam.ID
+		}
+	}
+
+	// Get starting 11 from each team
+	homePlayers := getPlayersFromTeam(match.HomeTeam.ID)[:11]
+	awayPlayers := getPlayersFromTeam(match.AwayTeam.ID)[:11]
+
+	// Update positions based on tactics and ball position
+	updateTeamWithTactics(matchID, homePlayers, true, homePossession, tactics.HomeOffensive, tactics.HomeDefensive, ball, match)
+	updateTeamWithTactics(matchID, awayPlayers, false, !homePossession, tactics.AwayOffensive, tactics.AwayDefensive, ball, match)
+
+	// Update ball position
+	updateBallPhysics(matchID, ball)
+}
+
+func updateTeamWithTactics(matchID int, teamPlayers []*Player, isHome, hasPossession bool,
+	offensiveTactic, defensiveTactic string, ball *BallPosition, match *Match) {
+
+	formation := match.HomeFormation
+	if !isHome {
+		formation = match.AwayFormation
+	}
+
+	// Get formation positions
+	positions := getFormationPositions(formation, isHome)
+
 	for i, player := range teamPlayers {
-		if player == nil {
+		if player == nil || i >= len(positions) {
 			continue
 		}
 
-		// Generate realistic positions based on formation and game flow
+		basePos := positions[i]
 		var x, y float64
 
-		if isHome {
-			// Home team starts from left side
-			x = generateXPosition(player.Position, true, match.Minute)
-			y = generateYPosition(player.Position, i)
+		if hasPossession {
+			// Offensive positioning based on tactic
+			x, y = calculateOffensivePosition(player, basePos, offensiveTactic, ball, match.Minute)
 		} else {
-			// Away team starts from right side
-			x = generateXPosition(player.Position, false, match.Minute)
-			y = generateYPosition(player.Position, i)
+			// Defensive positioning based on tactic
+			x, y = calculateDefensivePosition(player, basePos, defensiveTactic, ball, match.Minute)
 		}
 
-		// Add some randomness for realistic movement
-		x += (rand.Float64() - 0.5) * 10
-		y += (rand.Float64() - 0.5) * 8
+		// Add slight natural movement
+		x += math.Sin(float64(time.Now().Unix())+float64(player.ID)) * 1.5
+		y += math.Cos(float64(time.Now().Unix())+float64(player.ID)*1.5) * 1.5
 
-		// Keep within field bounds
+		// Keep within bounds
 		x = math.Max(0, math.Min(FieldWidth, x))
 		y = math.Max(0, math.Min(FieldHeight, y))
 
@@ -2640,88 +4483,66 @@ func updateTeamLocations(matchID int, teamPlayers []*Player, isHome bool) {
 	}
 }
 
-func generateXPosition(position string, isHome bool, minute int) float64 {
-	var baseX float64
+func calculateOffensivePosition(player *Player, basePos FormationPosition, tactic string, ball *BallPosition, minute int) (float64, float64) {
+	x, y := basePos.X, basePos.Y
 
-	if isHome {
-		switch position {
-		case PosGK:
-			baseX = 5
-		case PosCB:
-			baseX = 15
-		case PosLB, PosRB:
-			baseX = 25
-		case PosCDM:
-			baseX = 35
-		case PosCM:
-			baseX = 45
-		case PosCAM:
-			baseX = 55
-		case PosLW, PosRW:
-			baseX = 65
-		case PosST:
-			baseX = 75
-		default:
-			baseX = 40
+	switch tactic {
+	case TacticTikiTaka:
+		// Players form triangles around the ball
+		if distance(x, y, ball.X, ball.Y) < 20 {
+			angle := math.Atan2(y-ball.Y, x-ball.X)
+			x = ball.X + math.Cos(angle)*12
+			y = ball.Y + math.Sin(angle)*12
 		}
-	} else {
-		// Mirror for away team
-		switch position {
-		case PosGK:
-			baseX = 95
-		case PosCB:
-			baseX = 85
-		case PosLB, PosRB:
-			baseX = 75
-		case PosCDM:
-			baseX = 65
-		case PosCM:
-			baseX = 55
-		case PosCAM:
-			baseX = 45
-		case PosLW, PosRW:
-			baseX = 35
-		case PosST:
-			baseX = 25
-		default:
-			baseX = 60
+		// Slight forward push
+		x += 5
+
+	case TacticCounterAttack:
+		// Quick forward movement
+		if player.Position == PosST || player.Position == PosLW || player.Position == PosRW {
+			x += 15
+		}
+
+	case TacticWingPlay:
+		// Wingers stay wide
+		if player.Position == PosLW {
+			y = math.Min(y+10, FieldHeight-5)
+		} else if player.Position == PosRW {
+			y = math.Max(y-10, 5)
 		}
 	}
 
-	// Add game flow variation
-	flowVariation := math.Sin(float64(minute)/10) * 10
-	return baseX + flowVariation
+	return x, y
 }
 
-func generateYPosition(position string, playerIndex int) float64 {
-	switch position {
-	case PosGK:
-		return FieldHeight / 2
-	case PosCB:
-		if playerIndex%2 == 0 {
-			return FieldHeight/2 - 8
+func calculateDefensivePosition(player *Player, basePos FormationPosition, tactic string, ball *BallPosition, minute int) (float64, float64) {
+	x, y := basePos.X, basePos.Y
+
+	switch tactic {
+	case TacticCompactDefense:
+		// Move towards center and back
+		y = y*0.7 + (FieldHeight/2)*0.3
+		x -= 10
+
+	case TacticManMarking:
+		// Move closer to nearest opponent
+		// This would need opponent tracking
+		x = x*0.8 + ball.X*0.2
+		y = y*0.8 + ball.Y*0.2
+
+	case TacticLowBlock:
+		// Deep defensive line
+		if player.Position != PosGK {
+			x = math.Min(x, 30)
 		}
-		return FieldHeight/2 + 8
-	case PosLB:
-		return FieldHeight * 0.8
-	case PosRB:
-		return FieldHeight * 0.2
-	case PosCDM, PosCM:
-		return FieldHeight/2 + float64((playerIndex%3-1)*12)
-	case PosCAM:
-		return FieldHeight / 2
-	case PosLW:
-		return FieldHeight * 0.8
-	case PosRW:
-		return FieldHeight * 0.2
-	case PosST:
-		if playerIndex%2 == 0 {
-			return FieldHeight/2 - 6
-		}
-		return FieldHeight/2 + 6
-	default:
-		return FieldHeight / 2
 	}
+
+	return x, y
+}
+
+// Helper function for distance calculation
+func distance(x1, y1, x2, y2 float64) float64 {
+	return math.Sqrt(math.Pow(x2-x1, 2) + math.Pow(y2-y1, 2))
 }
 
 func calculatePlayerRatings(match *Match) {
@@ -2748,24 +4569,77 @@ func calculatePlayerRatings(match *Match) {
 func calculateIndividualRating(player *Player, match *Match, isHome bool) float64 {
 	baseRating := 6.0
 
-	// Adjust based on result
-	if (isHome && match.HomeScore > match.AwayScore) || (!isHome && match.AwayScore > match.HomeScore) {
-		baseRating += 0.5 // Win bonus
-	} else if match.HomeScore == match.AwayScore {
-		baseRating += 0.2 // Draw bonus
+	// Performance during match (accumulated from events)
+	performanceBonus := player.CurrentRating - 6.0
+	baseRating += math.Max(-2.5, math.Min(4.0, performanceBonus))
+
+	// Position-specific bonuses
+	switch player.Position {
+	case PosGK:
+		// GK gets bonus for saves, penalty for goals conceded
+		oppScore := match.AwayScore
+		if !isHome {
+			oppScore = match.HomeScore
+		}
+		if oppScore == 0 {
+			baseRating += 1.0 // Clean sheet bonus
+		} else if oppScore >= 3 {
+			baseRating -= 0.5 // Heavy defeat penalty
+		}
+
+	case PosST, PosLW, PosRW:
+		// Attackers get bonus for goals and shots
+		if player.SeasonStats.GoalsThisSeason > 0 && rand.Float64() < 0.3 {
+			baseRating += 0.8 // Goal bonus
+		}
+
+	case PosCB, PosLB, PosRB:
+		// Defenders get clean sheet bonus
+		oppScore := match.AwayScore
+		if !isHome {
+			oppScore = match.HomeScore
+		}
+		if oppScore == 0 {
+			baseRating += 0.7
+		} else if oppScore >= 2 {
+			baseRating -= 0.4
+		}
+
+	case PosCM, PosCAM, PosCDM:
+		// Midfielders get bonus for assists and all-round play
+		if player.SeasonStats.AssistsThisSeason > 0 && rand.Float64() < 0.2 {
+			baseRating += 0.5 // Assist bonus
+		}
 	}
 
-	// Add current match rating adjustments from events
-	baseRating += math.Max(-3.0, math.Min(3.0, player.CurrentRating-6.0))
+	// Team result impact
+	teamScore := match.HomeScore
+	oppScore := match.AwayScore
+	if !isHome {
+		teamScore = match.AwayScore
+		oppScore = match.HomeScore
+	}
 
-	// Add some randomness based on characteristics
-	performanceVariation := (rand.Float64() - 0.5) * 2 * (float64(player.Characteristics.Mentality) / 100)
-	baseRating += performanceVariation
+	if teamScore > oppScore {
+		baseRating += 0.4 // Win bonus
+	} else if teamScore < oppScore {
+		baseRating -= 0.4 // Loss penalty
+	} else {
+		baseRating += 0.1 // Small draw bonus
+	}
 
-	// Reset current rating for next match
+	// Card penalties
+	if player.YellowCards > 0 {
+		baseRating -= 0.3
+	}
+	if player.RedCards > 0 {
+		baseRating -= 1.5
+	}
+
+	// Reset for next match
 	player.CurrentRating = 6.0
 
-	return math.Max(1.0, math.Min(10.0, baseRating))
+	return math.Max(3.0, math.Min(10.0, baseRating))
 }
 
 func updatePlayerSeasonStats(player *Player, rating float64, minutesPlayed int) {
@@ -2806,7 +4680,7 @@ func getTeamsByLeague(league string) []*TeamInfo {
 }
 
 func initializeLeagueTables() {
-	leagues := []string{LeaguePremier, LeagueLaLiga}
+	leagues := []string{LeaguePremier, LeagueCommunityLeague}
 
 	for _, league := range leagues {
 		leagueTeams := getTeamsByLeague(league)
@@ -2931,40 +4805,40 @@ func getNextUnplayedMatchForLeague(league string) *SeasonSchedule {
 }
 
 func getNextUnplayedMatch() *SeasonSchedule {
-	// Get the current minimum matches played across all teams to ensure fair scheduling
+	// Get the current minimum matches played across all teams for balanced scheduling
 	minMatchesPlayed := getMinimumMatchesPlayed()
+	maxMatchesPlayed := getMaximumMatchesPlayed()
 
-	// First, try to find matches for teams that have played the minimum number of matches
-	for _, league := range []string{LeaguePremier, LeagueLaLiga} {
-		if schedules, exists := seasonSchedules[league]; exists {
-			for _, schedule := range schedules {
-				if !schedule.IsPlayed {
-					// Check if both teams have played the minimum number of matches
-					homeMatchesPlayed := getTeamMatchesPlayed(schedule.HomeTeam.ID)
-					awayMatchesPlayed := getTeamMatchesPlayed(schedule.AwayTeam.ID)
-
-					// Prioritize matches where both teams have played minimum matches
-					if homeMatchesPlayed <= minMatchesPlayed && awayMatchesPlayed <= minMatchesPlayed {
-						logInfo("🎯 Selected match (balanced): %s vs %s (Home: %d played, Away: %d played)",
-							schedule.HomeTeam.ShortName, schedule.AwayTeam.ShortName,
-							homeMatchesPlayed, awayMatchesPlayed)
-						return schedule
-					}
-				}
-			}
-		}
+	// If difference is too large, prioritize teams that played least
+	if maxMatchesPlayed-minMatchesPlayed > 2 {
+		return getMatchForLeastPlayedTeams()
 	}
 
-	// If no balanced matches found, get any unplayed match (fallback)
-	for _, league := range []string{LeaguePremier, LeagueLaLiga} {
+	// Otherwise, get next chronological match that's fair
+	for _, league := range []string{LeaguePremier, LeagueCommunityLeague} {
 		if schedules, exists := seasonSchedules[league]; exists {
+			// Sort by matchday to ensure chronological order
+			var sortedSchedules []*SeasonSchedule
 			for _, schedule := range schedules {
 				if !schedule.IsPlayed {
-					homeMatchesPlayed := getTeamMatchesPlayed(schedule.HomeTeam.ID)
-					awayMatchesPlayed := getTeamMatchesPlayed(schedule.AwayTeam.ID)
-					logInfo("🎯 Selected match (fallback): %s vs %s (Home: %d played, Away: %d played)",
+					sortedSchedules = append(sortedSchedules, schedule)
+				}
+			}
+
+			// Sort by matchday
+			sort.Slice(sortedSchedules, func(i, j int) bool {
+				return sortedSchedules[i].Matchday < sortedSchedules[j].Matchday
+			})
+
+			for _, schedule := range sortedSchedules {
+				homeMatchesPlayed := getTeamMatchesPlayed(schedule.HomeTeam.ID)
+				awayMatchesPlayed := getTeamMatchesPlayed(schedule.AwayTeam.ID)
+
+				// Ensure both teams haven't played too many matches ahead
+				if homeMatchesPlayed <= minMatchesPlayed+1 && awayMatchesPlayed <= minMatchesPlayed+1 {
+					logInfo("🎯 Selected balanced match: %s vs %s (Home: %d, Away: %d played, Min: %d)",
 						schedule.HomeTeam.ShortName, schedule.AwayTeam.ShortName,
-						homeMatchesPlayed, awayMatchesPlayed)
+						homeMatchesPlayed, awayMatchesPlayed, minMatchesPlayed)
 					return schedule
 				}
 			}
@@ -2972,6 +4846,41 @@ func getNextUnplayedMatch() *SeasonSchedule {
 	}
 
 	return nil
+}
+
+func getMatchForLeastPlayedTeams() *SeasonSchedule {
+	minMatchesPlayed := getMinimumMatchesPlayed()
+
+	for _, league := range []string{LeaguePremier, LeagueCommunityLeague} {
+		if schedules, exists := seasonSchedules[league]; exists {
+			for _, schedule := range schedules {
+				if !schedule.IsPlayed {
+					homeMatchesPlayed := getTeamMatchesPlayed(schedule.HomeTeam.ID)
+					awayMatchesPlayed := getTeamMatchesPlayed(schedule.AwayTeam.ID)
+
+					// Both teams must have played minimum matches
+					if homeMatchesPlayed == minMatchesPlayed && awayMatchesPlayed == minMatchesPlayed {
+						logInfo("🎯 Selected catch-up match: %s vs %s (both teams: %d played)",
+							schedule.HomeTeam.ShortName, schedule.AwayTeam.ShortName, minMatchesPlayed)
+						return schedule
+					}
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+func getMaximumMatchesPlayed() int {
+	maxMatches := 0
+	for _, team := range teams {
+		matchesPlayed := getTeamMatchesPlayed(team.ID)
+		if matchesPlayed > maxMatches {
+			maxMatches = matchesPlayed
+		}
+	}
+	return maxMatches
 }
 
 func getMinimumMatchesPlayed() int {
@@ -2987,7 +4896,7 @@ func getMinimumMatchesPlayed() int {
 
 func getTeamMatchesPlayed(teamID int) int {
 	matchesPlayed := 0
-	for _, league := range []string{LeaguePremier, LeagueLaLiga} {
+	for _, league := range []string{LeaguePremier, LeagueCommunityLeague} {
 		if schedules, exists := seasonSchedules[league]; exists {
 			for _, schedule := range schedules {
 				if schedule.IsPlayed && (schedule.HomeTeam.ID == teamID || schedule.AwayTeam.ID == teamID) {
@@ -3031,105 +4940,47 @@ func calculateAttackStrength(team *TeamInfo) float64 {
 	// Adjust based on form
 	formAdjustment := float64(team.FormPoints) * 0.05
 
-	// Consider home/away streak
-	streakAdjustment := 0.0
-	if team.HomeStreak > 0 {
-		streakAdjustment += float64(team.HomeStreak) * 0.1
-	} else if team.HomeStreak < 0 {
-		streakAdjustment += float64(team.HomeStreak) * 0.1
-	}
-
-	return baseStrength + formAdjustment + streakAdjustment
+	return baseStrength + formAdjustment
 }
 
 func updateTeamForm(team *TeamInfo, result string, isHome bool) {
-	// Add result to form (most recent first)
-	team.Form = append([]string{result}, team.Form...)
-	if len(team.Form) > 5 {
-		team.Form = team.Form[:5]
+	// Update form array (last 5 results)
+	if len(team.Form) >= 5 {
+		team.Form = team.Form[1:]
 	}
+	team.Form = append(team.Form, result)
 
-	// Recalculate form points
+	// Calculate form points
 	team.FormPoints = 0
 	for _, r := range team.Form {
 		switch r {
-		case FormWin:
+		case "W":
 			team.FormPoints += 3
-		case FormDraw:
+		case "D":
 			team.FormPoints += 1
-		case FormLoss:
-			team.FormPoints += 0
 		}
 	}
 
-	// Update streaks
-	if isHome {
-		if result == FormWin {
-			if team.HomeStreak >= 0 {
-				team.HomeStreak++
-			} else {
-				team.HomeStreak = 1
-			}
-		} else {
-			if team.HomeStreak <= 0 {
-				team.HomeStreak--
-			} else {
-				team.HomeStreak = -1
-			}
-		}
-	} else {
-		if result == FormWin {
-			if team.AwayStreak >= 0 {
-				team.AwayStreak++
-			} else {
-				team.AwayStreak = 1
-			}
-		} else {
-			if team.AwayStreak <= 0 {
-				team.AwayStreak--
-			} else {
-				team.AwayStreak = -1
-			}
-		}
-	}
-
-	log.Printf("📊 %s form updated: %v (Points: %d, Home streak: %d, Away streak: %d)",
-		team.ShortName, team.Form, team.FormPoints, team.HomeStreak, team.AwayStreak)
+	logInfo("Updated team form: %s - Form: %v, Points: %d",
+		team.ShortName, team.Form, team.FormPoints)
 }
 
 // Calculate team strength based on player ratings and form
 func calculateTeamStrength(team *TeamInfo) float64 {
-	// Get all players for the team
-	teamPlayers := getPlayersFromTeam(team.ID)
-	if len(teamPlayers) == 0 {
-		return 0.5 // Default strength if no players found
+	// Base strength from form points (0-15 points possible)
+	formStrength := float64(team.FormPoints) / 15.0
+
+	// Calculate final strength (0.0 to 1.0)
+	strength := formStrength
+
+	// Ensure strength is within bounds
+	if strength < 0.0 {
+		strength = 0.0
+	} else if strength > 1.0 {
+		strength = 1.0
 	}
 
-	// Calculate average player rating
-	totalRating := 0.0
-	for _, player := range teamPlayers {
-		totalRating += player.CurrentRating
-	}
-	avgRating := totalRating / float64(len(teamPlayers))
-
-	// Calculate form impact (0.8 to 1.2 multiplier)
-	formMultiplier := 1.0
-	if len(team.Form) > 0 {
-		formPoints := team.FormPoints
-		maxPossiblePoints := 15 // 5 matches * 3 points
-		formMultiplier = 0.8 + (float64(formPoints)/float64(maxPossiblePoints))*0.4
-	}
-
-	// Calculate team characteristics impact
-	characteristicsImpact := 0.0
-	for _, player := range teamPlayers {
-		characteristicsImpact += float64(player.Characteristics.Overall) / 100.0
-	}
-	characteristicsImpact /= float64(len(teamPlayers))
-
-	// Combine all factors
-	teamStrength := (avgRating / 10.0) * formMultiplier * (0.7 + characteristicsImpact*0.3)
-	return math.Max(0.1, math.Min(1.0, teamStrength))
+	return strength
 }
 
 func getTableData(w http.ResponseWriter, r *http.Request) {
@@ -3333,7 +5184,7 @@ func getTableData(w http.ResponseWriter, r *http.Request) {
 				<label for="league-select">Select League:</label>
 				<select id="league-select" onchange="changeLeague()">
 					<option value="Premier League"%s>Premier League</option>
-					<option value="La Liga"%s>La Liga</option>
+					<option value="Community League"%s>Community League</option>
 				</select>
 				<div class="info-box">
 					<strong>Home Streak:</strong> Consecutive wins/losses at home stadium<br>
@@ -3350,7 +5201,7 @@ func getTableData(w http.ResponseWriter, r *http.Request) {
 			</script>
 		`,
 			map[bool]string{true: " selected", false: ""}[selectedLeague == "Premier League"],
-			map[bool]string{true: " selected", false: ""}[selectedLeague == "La Liga"],
+			map[bool]string{true: " selected", false: ""}[selectedLeague == "Community League"],
 		)
 		tableHTML, totalItems = generateLeagueTablesTableForLeague(selectedLeague, page, itemsPerPage)
 		tableHTML = extraContent + tableHTML
@@ -3611,73 +5462,46 @@ func generateMatchesTable(page, itemsPerPage int) (string, int) {
 
 func generateTeamsTable(page, itemsPerPage int) (string, int) {
 	var html strings.Builder
-	html.WriteString(`
-		<table>
-			<tr>
-				<th>ID</th>
-				<th>Name</th>
-				<th>League</th>
-				<th>Manager</th>
-				<th>Form</th>
-				<th>Form Points</th>
-				<th>Home Streak</th>
-				<th>Away Streak</th>
-			</tr>
-	`)
-
-	// Calculate start and end indices for pagination
 	start := (page - 1) * itemsPerPage
 	end := start + itemsPerPage
 
-	// Convert teams map to slice for pagination
-	var teamList []*TeamInfo
+	// Get all teams
+	allTeams := make([]*TeamInfo, 0, len(teams))
 	for _, team := range teams {
-		teamList = append(teamList, team)
+		allTeams = append(allTeams, team)
 	}
 
-	// Sort teams by ID
-	sort.Slice(teamList, func(i, j int) bool {
-		return teamList[i].ID < teamList[j].ID
+	// Sort teams by name
+	sort.Slice(allTeams, func(i, j int) bool {
+		return allTeams[i].Name < allTeams[j].Name
 	})
 
-	// Apply pagination
-	if start < len(teamList) {
-		if end > len(teamList) {
-			end = len(teamList)
-		}
-		for _, team := range teamList[start:end] {
-			formHTML := ""
-			for _, result := range team.Form {
-				class := ""
-				switch result {
-				case FormWin:
-					class = "form-win"
-				case FormDraw:
-					class = "form-draw"
-				case FormLoss:
-					class = "form-loss"
-				}
-				formHTML += fmt.Sprintf(`<span class="%s">%s</span> `, class, result)
-			}
+	// Calculate total pages
+	totalPages := (len(allTeams) + itemsPerPage - 1) / itemsPerPage
 
-			html.WriteString(fmt.Sprintf(`
-				<tr>
-					<td>%d</td>
-					<td>%s</td>
-					<td>%s</td>
-					<td>%s</td>
-					<td>%s</td>
-					<td>%d</td>
-					<td>%d</td>
-					<td>%d</td>
-				</tr>
-			`, team.ID, team.Name, team.League, team.Manager, formHTML,
-				team.FormPoints, team.HomeStreak, team.AwayStreak))
-		}
+	// Generate table
+	html.WriteString("<table class='table table-striped'>")
+	html.WriteString("<thead><tr>")
+	html.WriteString("<th>ID</th>")
+	html.WriteString("<th>Name</th>")
+	html.WriteString("<th>League</th>")
+	html.WriteString("<th>Form</th>")
+	html.WriteString("<th>Form Points</th>")
+	html.WriteString("</tr></thead><tbody>")
+
+	for i := start; i < end && i < len(allTeams); i++ {
+		team := allTeams[i]
+		html.WriteString("<tr>")
+		html.WriteString(fmt.Sprintf("<td>%d</td>", team.ID))
+		html.WriteString(fmt.Sprintf("<td>%s</td>", team.Name))
+		html.WriteString(fmt.Sprintf("<td>%s</td>", team.League))
+		html.WriteString(fmt.Sprintf("<td>%v</td>", team.Form))
+		html.WriteString(fmt.Sprintf("<td>%d</td>", team.FormPoints))
+		html.WriteString("</tr>")
 	}
 
-	html.WriteString("</table>")
-	return html.String(), len(teamList)
+	html.WriteString("</tbody></table>")
+	return html.String(), totalPages
 }
 
 func generatePlayersTable(page, itemsPerPage int) (string, int) {
