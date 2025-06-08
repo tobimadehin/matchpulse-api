@@ -81,7 +81,7 @@ No authentication required - public API
 ### Get All Matches
 - **GET** `/matches?status={status}&league={league}&page={page}&limit={limit}`
 - **Parameters**:
-  - `status` (optional): Filter by status (live, finished, scheduled)
+  - `status` (optional): Filter by status (LIVE, HALFTIME, FINISHED, POSTPONED, COOLDOWN, BREAK)
   - `league` (optional): Filter by league name
   - `page` (optional): Page number (default: 1)
   - `limit` (optional): Items per page (default: 10, max: 50)
@@ -107,15 +107,25 @@ No authentication required - public API
       "home_score": 2,
       "away_score": 1,
       "minute": 67,
-      "status": "live",
+      "status": "LIVE",
       "competition": "Premier League",
       "venue": "Stellar Stadium",
       "attendance": 45000,
       "weather": "Clear",
       "temperature": 18,
-      "start_time": "2024-01-15T14:00:00Z",
+      "home_formation": "4-4-2",
+      "away_formation": "4-3-3",
       "season": 1,
-      "matchweek": 15
+      "matchweek": 15,
+      "start_time": "2024-01-15T14:00:00Z",
+      "end_time": null,
+      "player_ratings": {
+        "123": 7.5,
+        "124": 8.2
+      },
+      "injury_time": 3,
+      "halftime_end_time": null,
+      "is_in_break": false
     }
   ],
   "pagination": {
@@ -214,9 +224,12 @@ No authentication required - public API
     "x": 67.5,
     "y": 32.0,
     "possessor_id": 124,
+    "last_touch_id": 123,
     "speed": 8.5,
     "direction": 45.0,
-    "event_type": "play"
+    "event_type": "play",
+    "event_started": "2024-01-15T14:30:00Z",
+    "timestamp": "2024-01-15T14:30:00Z"
   }
 }
 ```
@@ -295,6 +308,22 @@ No authentication required - public API
 }
 ```
 
+### Get Match Tactics
+- **GET** `/matches/{id}/tactics`
+- **Response**:
+```json
+{
+  "match_id": 1,
+  "tactics": {
+    "home_offensive": "TIKI_TAKA",
+    "home_defensive": "COMPACT_DEFENSE",
+    "away_offensive": "COUNTER_ATTACK",
+    "away_defensive": "ZONAL_MARKING"
+  },
+  "timestamp": "2024-01-15T14:30:00Z"
+}
+```
+
 ---
 
 ## PLAYER ENDPOINTS
@@ -339,7 +368,10 @@ No authentication required - public API
         "minutes_played": 1350,
         "goals_this_season": 0,
         "assists_this_season": 2,
-        "average_rating": 7.2
+        "yellow_cards_this_season": 1,
+        "red_cards_this_season": 0,
+        "average_rating": 7.2,
+        "total_rating": 108.0
       },
       "current_rating": 7.5
     }
@@ -451,7 +483,8 @@ No authentication required - public API
       "goals_against": 12,
       "goal_difference": 16,
       "points": 33,
-      "form": ["W", "W", "D", "W", "L"]
+      "form": ["W", "W", "D", "W", "L"],
+      "last_update": "2024-01-15T14:30:00Z"
     }
   ],
   "last_update": "2024-01-15T14:30:00Z"
@@ -564,9 +597,23 @@ No authentication required - public API
         "name": "Marcus Johnson 1",
         "goals": 32
       },
+      "top_assists": {
+        "id": 124,
+        "name": "Oliver Brown 20",
+        "assists": 25
+      },
+      "most_fouls": {
+        "id": 125,
+        "name": "Diego Martinez 8",
+        "fouls": 45
+      },
       "player_of_season": {
         "id": 123,
         "name": "Marcus Johnson 1"
+      },
+      "champion": {
+        "id": 1,
+        "name": "Capricon FC"
       },
       "total_goals": 856,
       "total_matches": 380,
@@ -597,7 +644,7 @@ No authentication required - public API
         "name": "The Galacticons"
       },
       "scheduled_at": "2024-01-15T14:00:00Z",
-      "status": "live"
+      "status": "LIVE"
     }
   ]
 }
@@ -659,6 +706,8 @@ For live match tracking, poll these endpoints every 5-10 seconds:
 - `/api/v1/matches/{id}/probabilities` - Win probabilities
 - `/api/v1/matches/{id}/commentary?since={last_timestamp}` - New commentary
 - `/api/v1/matches/{id}/players` - Player positions (optional)
+- `/api/v1/matches/{id}/availability` - Player availability (optional)
+- `/api/v1/matches/{id}/tactics` - Match tactics (optional)
 
 ## PERFORMANCE TIPS
 

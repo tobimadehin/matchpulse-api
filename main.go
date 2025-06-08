@@ -361,18 +361,17 @@ type LiveCommentary struct {
 }
 
 type GlobalStats struct {
-	TotalMatches    int       `json:"total_matches"`
-	TotalGoals      int       `json:"total_goals"`
-	AverageGoals    float64   `json:"average_goals"`
-	MostGoalsMatch  int       `json:"most_goals_match_id"`
-	ActiveViewers   int       `json:"active_viewers"`
-	TopScorer       Player    `json:"top_scorer"`
-	MostActiveMatch int       `json:"most_active_match_id"`
-	LastUpdate      time.Time `json:"last_update"`
-	// New fields for extended simulation
-	CurrentSeason    int     `json:"current_season"`
-	CurrentMatchweek int     `json:"current_matchweek"`
-	SeasonProgress   float64 `json:"season_progress"`
+	TotalMatches     int       `json:"total_matches"`
+	TotalGoals       int       `json:"total_goals"`
+	AverageGoals     float64   `json:"average_goals"`
+	MostGoalsMatch   int       `json:"most_goals_match_id"`
+	ActiveViewers    int       `json:"active_viewers"`
+	TopScorer        Player    `json:"top_scorer"`
+	MostActiveMatch  int       `json:"most_active_match_id"`
+	LastUpdate       time.Time `json:"last_update"`
+	CurrentSeason    int       `json:"current_season"`
+	CurrentMatchweek int       `json:"current_matchweek"`
+	SeasonProgress   float64   `json:"season_progress"`
 }
 
 type SeasonWinners struct {
@@ -433,13 +432,14 @@ var leagueConfigs = map[string]LeagueConfig{
 // In-memory database - add season schedules
 var (
 	// Original storage
-	matches        = make(map[int]*Match)
-	matchStats     = make(map[int]*MatchStats)
-	players        = make(map[int]*Player)
-	teams          = make(map[int]*TeamInfo)
-	leagueTables   = make(map[string][]*LeagueTable)
-	liveCommentary = make(map[int][]*LiveCommentary)
-	globalStats    = &GlobalStats{}
+	matches         = make(map[int]*Match)
+	finishedMatches = make(map[int]*Match) // New map for finished matches
+	matchStats      = make(map[int]*MatchStats)
+	players         = make(map[int]*Player)
+	teams           = make(map[int]*TeamInfo)
+	leagueTables    = make(map[string][]*LeagueTable)
+	liveCommentary  = make(map[int][]*LiveCommentary)
+	globalStats     = &GlobalStats{}
 
 	// Extended storage
 	playerLocations  = make(map[int]map[int]*PlayerLocation) // matchID -> playerID -> location
@@ -467,6 +467,9 @@ var (
 
 	// Add this at the top of the file with other global variables
 	startTime = time.Now()
+
+	// Add scheduling synchronization
+	schedulingMutex = &sync.Mutex{} // Separate mutex for schedule operations
 )
 
 // Team and player data
@@ -651,6 +654,9 @@ func initializeSimulation() {
 	for league := range leagueConfigs {
 		generateSeasonSchedule(league)
 	}
+
+	// Log fixture summary
+	logFixtureSummary()
 
 	updateGlobalStats()
 
@@ -1496,9 +1502,12 @@ func startCooldownAndCreateNext(finishedMatchID int) {
 	time.Sleep(PostMatchBreakSeconds * time.Second)
 
 	mutex.Lock()
-	// Remove finished match from active matches after cooldown
-	delete(matches, finishedMatchID)
-	logInfo("🗑️  Removed finished match %d from active matches", finishedMatchID)
+	// Move finished match to finishedMatches map instead of deleting
+	if match, exists := matches[finishedMatchID]; exists {
+		finishedMatches[finishedMatchID] = match
+		delete(matches, finishedMatchID)
+		logInfo("📦 Moved finished match %d to finished matches storage", finishedMatchID)
+	}
 
 	// Create next match
 	logInfo("🆕 Creating next match after post-match break...")
@@ -1507,10 +1516,21 @@ func startCooldownAndCreateNext(finishedMatchID int) {
 }
 
 func createNextMatch() {
+	// Use separate mutex for scheduling to prevent race conditions
+	schedulingMutex.Lock()
+	defer schedulingMutex.Unlock()
+
 	// Get next scheduled match
 	scheduledMatch := getNextUnplayedMatch()
 	if scheduledMatch == nil {
 		log.Printf("⚠️  No more scheduled matches available")
+		return
+	}
+
+	// Double-check the match isn't already being played (race condition fix)
+	if scheduledMatch.IsPlayed {
+		log.Printf("⚠️  Match already marked as played: %s vs %s",
+			scheduledMatch.HomeTeam.ShortName, scheduledMatch.AwayTeam.ShortName)
 		return
 	}
 
@@ -1529,6 +1549,8 @@ func createNextMatch() {
 		return
 	}
 
+	// Mark schedule as being played IMMEDIATELY to prevent race conditions
+	scheduledMatch.IsPlayed = true
 	matchCounter++
 
 	// Calculate match probabilities based on team form
@@ -1567,8 +1589,7 @@ func createNextMatch() {
 		IsInBreak:  false,
 	}
 
-	// Mark schedule as being played
-	scheduledMatch.IsPlayed = true
+	// Update schedule with match ID
 	scheduledMatch.MatchID = matchCounter
 
 	matches[matchCounter] = match
@@ -1655,7 +1676,7 @@ func seasonManager(ctx context.Context) {
 			logInfo("🗓️  Season check: Season %d, Week %d", currentSeason, currentMatchweek)
 			if shouldEndSeason() {
 				logInfo("🏁 Ending season %d...", currentSeason)
-				procesSeasonEnd()
+				endSeason()
 				startNewSeason()
 			}
 
@@ -1712,7 +1733,7 @@ func updateLeagueTable(match *Match) {
 			// Check if season should end after advancing matchweek
 			if shouldEndSeason() {
 				logInfo("🏁 Season complete! Starting season transition...")
-				procesSeasonEnd()
+				endSeason()
 				startNewSeason()
 			}
 		}
@@ -1771,7 +1792,7 @@ func updateGlobalStats() {
 	globalStats.LastUpdate = time.Now()
 }
 
-// HTTP Handlers (maintaining backward compatibility)
+// HTTP Handlers
 func getAllMatches(w http.ResponseWriter, r *http.Request) {
 	// Get query parameters
 	status := r.URL.Query().Get("status")
@@ -1779,29 +1800,55 @@ func getAllMatches(w http.ResponseWriter, r *http.Request) {
 	teamIDStr := r.URL.Query().Get("team_id")
 
 	mutex.RLock()
-	matchList := make([]*Match, 0, len(matches))
-	for _, match := range matches {
-		// Apply status filter
-		if status != "" && match.Status != status {
-			continue
-		}
+	matchList := make([]*Match, 0, len(matches)+len(finishedMatches))
 
-		// Apply league filter
+	// Helper function to check if match should be included
+	shouldInclude := func(match *Match) bool {
+		if status != "" {
+			// Special handling for "finished" status
+			if status == "finished" {
+				if match.Status != StatusFinished {
+					return false
+				}
+			} else if status == "live" {
+				if match.Status != StatusLive {
+					return false
+				}
+			} else if match.Status != status {
+				return false
+			}
+		}
 		if league != "" && match.Competition != league {
-			continue
+			return false
 		}
-
-		// Apply team filter
 		if teamIDStr != "" {
 			teamID, err := strconv.Atoi(teamIDStr)
 			if err == nil && match.HomeTeam.ID != teamID && match.AwayTeam.ID != teamID {
-				continue
+				return false
 			}
 		}
+		return true
+	}
 
-		matchList = append(matchList, match)
+	// Add active matches
+	for _, match := range matches {
+		if shouldInclude(match) {
+			matchList = append(matchList, match)
+		}
+	}
+
+	// Add finished matches
+	for _, match := range finishedMatches {
+		if shouldInclude(match) {
+			matchList = append(matchList, match)
+		}
 	}
 	mutex.RUnlock()
+
+	// Sort matches by ID for consistent ordering
+	sort.Slice(matchList, func(i, j int) bool {
+		return matchList[i].ID < matchList[j].ID
+	})
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -2248,7 +2295,7 @@ func searchAPI(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(results)
 }
 
-// Add this new function for goroutine monitoring
+// For goroutine monitoring - can be hooked to a grafana dashboard
 func getGoroutineStats() map[string]interface{} {
 	numGoroutines := runtime.NumGoroutine()
 
@@ -2341,6 +2388,15 @@ func serveHomepage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	mutex.RLock()
+	// Find first live match ID
+	var firstLiveMatchID int
+	for id, match := range matches {
+		if match.Status == StatusLive {
+			firstLiveMatchID = id
+			break
+		}
+	}
+
 	templateData := struct {
 		ActiveMatches    int
 		TotalPlayers     int
@@ -2349,6 +2405,7 @@ func serveHomepage(w http.ResponseWriter, r *http.Request) {
 		CurrentMatchweek int
 		LastUpdated      string
 		Version          string
+		FirstLiveMatchID int
 	}{
 		ActiveMatches:    len(matches),
 		TotalPlayers:     len(players),
@@ -2357,6 +2414,7 @@ func serveHomepage(w http.ResponseWriter, r *http.Request) {
 		CurrentMatchweek: currentMatchweek,
 		LastUpdated:      time.Now().Format("2006-01-02 15:04:05"),
 		Version:          version,
+		FirstLiveMatchID: firstLiveMatchID,
 	}
 	mutex.RUnlock()
 
@@ -2546,6 +2604,22 @@ func serveHomepage(w http.ResponseWriter, r *http.Request) {
             transform: translateY(-2px);
             color: white;
         }
+        .fixtures-link {
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 25px;
+            text-decoration: none;
+            font-weight: bold;
+            margin-top: 15px;
+            margin-right: 10px;
+            transition: transform 0.2s ease;
+        }
+        .fixtures-link:hover {
+            transform: translateY(-2px);
+            color: white;
+        }
     </style>
 </head>
 <body>
@@ -2595,10 +2669,10 @@ func serveHomepage(w http.ResponseWriter, r *http.Request) {
                 <div class="endpoint-group">
                     <h3>Enhanced Match Features</h3>
                     <ul>
-                        <li class="new-feature"><a href="/api/v1/matches/1/momentum">Match Momentum</a></li>
-                        <li class="new-feature"><a href="/api/v1/matches/1/probabilities">Win Probabilities</a></li>
-                        <li class="new-feature"><a href="/api/v1/matches/1/availability">Player Availability</a></li>
-                        <li class="enhanced-feature"><a href="/api/v1/matches/1/players">Player Positions</a></li>
+                        <li class="new-feature"><a href="/api/v1/matches/{{.FirstLiveMatchID}}/momentum">Match Momentum</a></li>
+                        <li class="new-feature"><a href="/api/v1/matches/{{.FirstLiveMatchID}}/probabilities">Win Probabilities</a></li>
+                        <li class="new-feature"><a href="/api/v1/matches/{{.FirstLiveMatchID}}/availability">Player Availability</a></li>
+                        <li class="enhanced-feature"><a href="/api/v1/matches/{{.FirstLiveMatchID}}/players">Player Positions</a></li>
                     </ul>
                 </div>
             </div>
@@ -2668,10 +2742,24 @@ func serveHomepage(w http.ResponseWriter, r *http.Request) {
                     </ul>
                 </div>
             </div>
+            <div class="section">
+                <h2>📅 Fixtures & Schedule</h2>
+                <div class="endpoint-group">
+                    <h3>Match Schedule</h3>
+                    <ul>
+                        <li><a href="/fixtures">View All Fixtures</a></li>
+                        <li><a href="/api/v1/fixtures">All Fixtures (API)</a></li>
+                        <li><a href="/api/v1/fixtures/Premier%20League">Premier League Fixtures</a></li>
+                        <li><a href="/api/v1/fixtures/Community%20League">Community League Fixtures</a></li>
+                        <li><a href="/api/v1/seasons/current/matchdays/{{.CurrentMatchweek}}">Current Matchday</a></li>
+                    </ul>
+                </div>
+            </div>
         </div>
         <div class="footer">
             <p><strong>🚀 New Features:</strong> Real-time momentum tracking • Dynamic match probabilities • Player availability system • Enhanced red card handling</p>
             <p><strong>API Version:</strong> v{{.Version}} | <strong>Last Updated:</strong> {{.LastUpdated}}</p>
+            <a href="/fixtures" class="fixtures-link">View Fixtures</a>
             <a href="/api-schema.txt" class="api-schema-link">Download API Schema</a>
             <a href="https://github.com/tobimadehin/matchpulse-api" class="github-link">View on GitHub</a>
         </div>
@@ -2720,58 +2808,18 @@ func shouldEndSeason() bool {
 	return true
 }
 
-func procesSeasonEnd() {
-	logInfo("🏁 Processing end of season %d...", currentSeason)
-
-	// Calculate season winners and stats
-	seasonWinner := calculateSeasonWinner()
-	topScorer := findTopScorer()
-	topAssists := findTopAssists()
-	mostFouls := findMostFouls()
-	playerOfSeason := findPlayerOfSeason()
-
-	// Store season history
-	seasonRecord := SeasonHistory{
-		Season:         currentSeason,
-		TopScorer:      *topScorer,
-		TopAssists:     *topAssists,
-		MostFouls:      *mostFouls,
-		PlayerOfSeason: *playerOfSeason,
-		Champion:       *seasonWinner,
-		TotalGoals:     calculateTotalSeasonGoals(),
-		TotalMatches:   SeasonMatches,
-		EndDate:        time.Now(),
-	}
-
-	seasonHistory = append(seasonHistory, seasonRecord)
-	if len(seasonHistory) > MaxSeasonHistory {
-		seasonHistory = seasonHistory[1:]
-	}
-
-	logInfo("🥇 Season %d Champions: %s", currentSeason, seasonWinner.Name)
-	logInfo("⚽ Top Scorer: %s (%d goals)", topScorer.Name, topScorer.SeasonStats.GoalsThisSeason)
-	logInfo("🅰️  Top Assists: %s (%d assists)", topAssists.Name, topAssists.SeasonStats.AssistsThisSeason)
-}
-
 func startNewSeason() {
-	logInfo("🆕 Starting season %d...", currentSeason+1)
-
-	// Reset for new season
-	resetForNewSeason()
-
-	// Increment season and reset matchweek
+	logInfo("🎬 Starting new season %d...", currentSeason+1)
 	currentSeason++
 	currentMatchweek = 1
 
-	// Generate new season schedules for all leagues
-	for league := range leagueConfigs {
-		generateSeasonSchedule(league)
-	}
+	// Clear finished matches at the start of new season
+	mutex.Lock()
+	finishedMatches = make(map[int]*Match)
+	mutex.Unlock()
 
-	// Create initial matches
-	createNextMatch()
-
-	logInfo("✅ Season %d started successfully", currentSeason)
+	// Reset other season-related data
+	// ... existing code ...
 }
 
 func batchUpdatePlayerStats() {
@@ -2961,14 +3009,6 @@ func resetForNewSeason() {
 	initializeLeagueTables()
 
 	log.Printf("📊 Reset complete: %d players reset, league tables reinitialized", playersReset)
-}
-
-type CommentaryEntry struct {
-	MatchID   int       `json:"match_id"`
-	Minute    int       `json:"minute"`
-	Text      string    `json:"text"`
-	EventType string    `json:"event_type"`
-	Timestamp time.Time `json:"timestamp"`
 }
 
 func updateTeamStats(teamID, points, wins, draws, losses int, match *Match) {
@@ -3199,7 +3239,94 @@ func getMatchdaySchedule(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Missing function implementations
+// Get all fixtures for all leagues - allows viewing the complete season schedule upfront
+func getAllFixtures(w http.ResponseWriter, r *http.Request) {
+	mutex.RLock()
+	defer mutex.RUnlock()
+
+	allFixtures := make(map[string][]*SeasonSchedule)
+	totalFixtures := 0
+
+	// Get all fixtures for each league
+	for league, schedules := range seasonSchedules {
+		allFixtures[league] = schedules
+		totalFixtures += len(schedules)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"fixtures":       allFixtures,
+		"total_fixtures": totalFixtures,
+		"current_season": currentSeason,
+		"timestamp":      time.Now(),
+	})
+}
+
+// Get all fixtures for a specific league
+func getLeagueFixtures(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	league := vars["league"]
+
+	mutex.RLock()
+	schedules, exists := seasonSchedules[league]
+	mutex.RUnlock()
+
+	if !exists {
+		http.Error(w, "League not found", http.StatusNotFound)
+		return
+	}
+
+	// Optional filtering
+	statusFilter := r.URL.Query().Get("status") // "played", "unplayed", "all"
+	matchdayStr := r.URL.Query().Get("matchday")
+
+	var filteredSchedules []*SeasonSchedule
+
+	for _, schedule := range schedules {
+		// Filter by status if requested
+		if statusFilter != "" && statusFilter != "all" {
+			if statusFilter == "played" && !schedule.IsPlayed {
+				continue
+			}
+			if statusFilter == "unplayed" && schedule.IsPlayed {
+				continue
+			}
+		}
+
+		// Filter by matchday if requested
+		if matchdayStr != "" {
+			matchday, err := strconv.Atoi(matchdayStr)
+			if err == nil && schedule.Matchday != matchday {
+				continue
+			}
+		}
+
+		filteredSchedules = append(filteredSchedules, schedule)
+	}
+
+	// Count played and unplayed
+	playedCount := 0
+	unplayedCount := 0
+	for _, schedule := range schedules {
+		if schedule.IsPlayed {
+			playedCount++
+		} else {
+			unplayedCount++
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"league":         league,
+		"fixtures":       filteredSchedules,
+		"total_fixtures": len(schedules),
+		"played_count":   playedCount,
+		"unplayed_count": unplayedCount,
+		"filtered_count": len(filteredSchedules),
+		"current_season": currentSeason,
+		"timestamp":      time.Now(),
+	})
+}
 
 func getMatchTactics(matchID int) *MatchTactics {
 	if tactics, exists := matchTactics[matchID]; exists {
@@ -4015,6 +4142,9 @@ func main() {
 	// Home page route
 	router.HandleFunc("/", serveHomepage).Methods("GET")
 
+	// Fixtures page route
+	router.HandleFunc("/fixtures", serveFixturesPage).Methods("GET")
+
 	// Tables route
 	router.HandleFunc("/tables", getTableData).Methods("GET")
 
@@ -4058,6 +4188,10 @@ func main() {
 	apiRouter.HandleFunc("/seasons/history", getSeasonHistory).Methods("GET")
 	apiRouter.HandleFunc("/seasons/current/matchdays/{matchday:[0-9]+}", getMatchdaySchedule).Methods("GET")
 
+	// Fixture endpoints - view all season fixtures upfront
+	apiRouter.HandleFunc("/fixtures", getAllFixtures).Methods("GET")
+	apiRouter.HandleFunc("/fixtures/{league}", getLeagueFixtures).Methods("GET")
+
 	// Print startup information
 	fmt.Printf("🚀 MatchPulse API v%s starting on port %s\n", version, port)
 	fmt.Printf("📚 API Documentation: %s/\n", baseURL)
@@ -4070,6 +4204,8 @@ func main() {
 	fmt.Printf("🏆 Season History: %s/api/v1/seasons/history\n", baseURL)
 	fmt.Printf("📈 Current Season: %s/api/v1/seasons/current\n", baseURL)
 	fmt.Printf("🏅 League Table: %s/api/v1/leagues/Premier%%20League/table\n", baseURL)
+	fmt.Printf("📅 All Fixtures: %s/api/v1/fixtures\n", baseURL)
+	fmt.Printf("📅 League Fixtures: %s/api/v1/fixtures/Premier%%20League\n", baseURL)
 
 	// Start server
 	log.Fatal(http.ListenAndServe("0.0.0.0:"+port, router))
@@ -4818,38 +4954,99 @@ func generateSeasonSchedule(league string) {
 	var schedules []*SeasonSchedule
 	matchday := 1
 
-	// Generate home and away fixtures (38 matchdays total)
-	for round := 0; round < 2; round++ { // Two rounds: home and away
-		for i := 0; i < len(leagueTeams); i++ {
-			for j := i + 1; j < len(leagueTeams); j++ {
-				var homeTeam, awayTeam *TeamInfo
+	// Generate proper round-robin tournament schedule
+	// Each team plays every other team twice (home and away)
+	totalRounds := len(leagueTeams) - 1
 
-				if round == 0 {
-					homeTeam = leagueTeams[i]
-					awayTeam = leagueTeams[j]
-				} else {
-					homeTeam = leagueTeams[j]
-					awayTeam = leagueTeams[i]
-				}
-
-				schedule := &SeasonSchedule{
-					Matchday:    matchday,
-					League:      league,
-					HomeTeam:    homeTeam,
-					AwayTeam:    awayTeam,
-					IsPlayed:    false,
-					ScheduledAt: time.Now().Add(time.Duration(matchday) * 24 * time.Hour),
-				}
-
-				schedules = append(schedules, schedule)
-				matchday++
+	// Generate first leg (teams play each other once)
+	for round := 0; round < totalRounds; round++ {
+		roundMatches := generateRoundMatches(leagueTeams, round)
+		for _, match := range roundMatches {
+			schedule := &SeasonSchedule{
+				Matchday:    matchday,
+				League:      league,
+				HomeTeam:    match.Home,
+				AwayTeam:    match.Away,
+				IsPlayed:    false,
+				ScheduledAt: time.Now().Add(time.Duration(matchday) * 24 * time.Hour),
 			}
+			schedules = append(schedules, schedule)
 		}
+		matchday++
+	}
+
+	// Generate return leg (teams play each other again with reversed home/away)
+	for round := 0; round < totalRounds; round++ {
+		roundMatches := generateRoundMatches(leagueTeams, round)
+		for _, match := range roundMatches {
+			// Reverse home and away for return leg
+			schedule := &SeasonSchedule{
+				Matchday:    matchday,
+				League:      league,
+				HomeTeam:    match.Away, // Swapped
+				AwayTeam:    match.Home, // Swapped
+				IsPlayed:    false,
+				ScheduledAt: time.Now().Add(time.Duration(matchday) * 24 * time.Hour),
+			}
+			schedules = append(schedules, schedule)
+		}
+		matchday++
 	}
 
 	seasonSchedules[league] = schedules
-	log.Printf("📅 Generated season schedule for %s: %d matches across %d matchdays",
-		league, len(schedules), matchday-1)
+	log.Printf("📅 Generated complete season schedule for %s: %d matches across %d matchdays (%d teams)",
+		league, len(schedules), matchday-1, len(leagueTeams))
+}
+
+// Helper struct for round generation
+type RoundMatch struct {
+	Home *TeamInfo
+	Away *TeamInfo
+}
+
+// Generate matches for a specific round using round-robin algorithm
+func generateRoundMatches(teams []*TeamInfo, round int) []RoundMatch {
+	var matches []RoundMatch
+	n := len(teams)
+
+	if n%2 != 0 {
+		log.Printf("⚠️ Odd number of teams (%d), scheduling may be unbalanced", n)
+		return matches
+	}
+
+	// Use round-robin tournament algorithm
+	// Fix one team and rotate others
+	for i := 0; i < n/2; i++ {
+		team1Idx := i
+		team2Idx := (n - 1 - i + round) % (n - 1)
+
+		// Ensure we don't go out of bounds
+		if team2Idx >= team1Idx {
+			team2Idx++
+		}
+
+		if team1Idx < len(teams) && team2Idx < len(teams) && team1Idx != team2Idx {
+			matches = append(matches, RoundMatch{
+				Home: teams[team1Idx],
+				Away: teams[team2Idx],
+			})
+		}
+	}
+
+	return matches
+}
+
+// Log a summary of all generated fixtures
+func logFixtureSummary() {
+	totalFixtures := 0
+	for league, schedules := range seasonSchedules {
+		totalFixtures += len(schedules)
+		log.Printf("📅 %s: %d fixtures generated (Matchdays 1-%d)",
+			league, len(schedules), len(schedules)/(len(getTeamsByLeague(league))/2))
+	}
+	log.Printf("🏆 Total season fixtures: %d matches across all leagues", totalFixtures)
+	log.Printf("🔍 View all fixtures: GET /api/v1/fixtures")
+	log.Printf("🔍 View league fixtures: GET /api/v1/fixtures/{league}")
 }
 
 func getScheduledMatches(league string, matchday int) []*SeasonSchedule {
@@ -4878,13 +5075,34 @@ func getNextUnplayedMatchForLeague(league string) *SeasonSchedule {
 }
 
 func getNextUnplayedMatch() *SeasonSchedule {
+	// This function is called within schedulingMutex, so no additional locking needed
+
 	// Get the current minimum matches played across all teams for balanced scheduling
 	minMatchesPlayed := getMinimumMatchesPlayed()
 	maxMatchesPlayed := getMaximumMatchesPlayed()
 
-	// If difference is too large, prioritize teams that played least
+	// If difference is too large, try to find any valid match
 	if maxMatchesPlayed-minMatchesPlayed > 2 {
-		return getMatchForLeastPlayedTeams()
+		// First try to find a match between least played teams
+		if match := getMatchForLeastPlayedTeams(); match != nil {
+			return match
+		}
+
+		// If that fails, fall back to any unplayed match
+		for _, league := range []string{LeaguePremier, LeagueCommunityLeague} {
+			if schedules, exists := seasonSchedules[league]; exists {
+				for _, schedule := range schedules {
+					if !schedule.IsPlayed {
+						logInfo("🎯 Selected fallback match: %s vs %s (Home: %d, Away: %d played)",
+							schedule.HomeTeam.ShortName, schedule.AwayTeam.ShortName,
+							getTeamMatchesPlayed(schedule.HomeTeam.ID),
+							getTeamMatchesPlayed(schedule.AwayTeam.ID))
+						return schedule
+					}
+				}
+			}
+		}
+		return nil
 	}
 
 	// Otherwise, get next chronological match that's fair
@@ -4907,8 +5125,8 @@ func getNextUnplayedMatch() *SeasonSchedule {
 				homeMatchesPlayed := getTeamMatchesPlayed(schedule.HomeTeam.ID)
 				awayMatchesPlayed := getTeamMatchesPlayed(schedule.AwayTeam.ID)
 
-				// Ensure both teams haven't played too many matches ahead
-				if homeMatchesPlayed <= minMatchesPlayed+1 && awayMatchesPlayed <= minMatchesPlayed+1 {
+				// More flexible criteria: allow matches if teams haven't played too many more than minimum
+				if homeMatchesPlayed <= minMatchesPlayed+2 && awayMatchesPlayed <= minMatchesPlayed+2 {
 					logInfo("🎯 Selected balanced match: %s vs %s (Home: %d, Away: %d played, Min: %d)",
 						schedule.HomeTeam.ShortName, schedule.AwayTeam.ShortName,
 						homeMatchesPlayed, awayMatchesPlayed, minMatchesPlayed)
@@ -4931,10 +5149,12 @@ func getMatchForLeastPlayedTeams() *SeasonSchedule {
 					homeMatchesPlayed := getTeamMatchesPlayed(schedule.HomeTeam.ID)
 					awayMatchesPlayed := getTeamMatchesPlayed(schedule.AwayTeam.ID)
 
-					// Both teams must have played minimum matches
-					if homeMatchesPlayed == minMatchesPlayed && awayMatchesPlayed == minMatchesPlayed {
-						logInfo("🎯 Selected catch-up match: %s vs %s (both teams: %d played)",
-							schedule.HomeTeam.ShortName, schedule.AwayTeam.ShortName, minMatchesPlayed)
+					// More flexible: allow teams that have played minimum or minimum+1 matches
+					if (homeMatchesPlayed == minMatchesPlayed || homeMatchesPlayed == minMatchesPlayed+1) &&
+						(awayMatchesPlayed == minMatchesPlayed || awayMatchesPlayed == minMatchesPlayed+1) {
+						logInfo("🎯 Selected catch-up match: %s vs %s (Home: %d, Away: %d played, Min: %d)",
+							schedule.HomeTeam.ShortName, schedule.AwayTeam.ShortName,
+							homeMatchesPlayed, awayMatchesPlayed, minMatchesPlayed)
 						return schedule
 					}
 				}
@@ -5008,12 +5228,23 @@ func calculateMatchProbabilities(homeTeam, awayTeam *TeamInfo) (homeWin, draw, a
 }
 
 func calculateAttackStrength(team *TeamInfo) float64 {
-	baseStrength := 0.5
+	// Base strength (0.4 to ensure minimum reasonable strength)
+	baseStrength := 0.4
 
-	// Adjust based on form
-	formAdjustment := float64(team.FormPoints) * 0.05
+	// Form strength (0-15 points possible, scaled to 0.0-0.3)
+	formStrength := float64(team.FormPoints) / 15.0 * 0.3
 
-	return baseStrength + formAdjustment
+	// Calculate final strength (0.4 to 0.7)
+	strength := baseStrength + formStrength
+
+	// Ensure strength is within bounds
+	if strength < 0.4 {
+		strength = 0.4
+	} else if strength > 0.7 {
+		strength = 0.7
+	}
+
+	return strength
 }
 
 func updateTeamForm(team *TeamInfo, result string, isHome bool) {
@@ -5040,17 +5271,20 @@ func updateTeamForm(team *TeamInfo, result string, isHome bool) {
 
 // Calculate team strength based on player ratings and form
 func calculateTeamStrength(team *TeamInfo) float64 {
-	// Base strength from form points (0-15 points possible)
-	formStrength := float64(team.FormPoints) / 15.0
+	// Base strength (0.4 to ensure minimum reasonable strength)
+	baseStrength := 0.4
 
-	// Calculate final strength (0.0 to 1.0)
-	strength := formStrength
+	// Form strength (0-15 points possible, scaled to 0.0-0.3)
+	formStrength := float64(team.FormPoints) / 15.0 * 0.3
+
+	// Calculate final strength (0.4 to 0.7)
+	strength := baseStrength + formStrength
 
 	// Ensure strength is within bounds
-	if strength < 0.0 {
-		strength = 0.0
-	} else if strength > 1.0 {
-		strength = 1.0
+	if strength < 0.4 {
+		strength = 0.4
+	} else if strength > 0.7 {
+		strength = 0.7
 	}
 
 	return strength
@@ -5703,4 +5937,261 @@ func generateSeasonStatsTable(page, itemsPerPage int) (string, int) {
 
 	html.WriteString("</table>")
 	return html.String(), len(historyList)
+}
+
+func serveFixturesPage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	mutex.RLock()
+	templateData := struct {
+		CurrentSeason    int
+		CurrentMatchweek int
+		LastUpdated      string
+		Version          string
+	}{
+		CurrentSeason:    currentSeason,
+		CurrentMatchweek: currentMatchweek,
+		LastUpdated:      time.Now().Format("2006-01-02 15:04:05"),
+		Version:          version,
+	}
+	mutex.RUnlock()
+
+	const htmlTemplate = `<!DOCTYPE html>
+<html>
+<head>
+    <title>MatchPulse Fixtures - v{{.Version}}</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            box-sizing: border-box;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            min-height: calc(100vh - 40px);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #f1f3f4;
+        }
+        .header h1 {
+            font-size: 2.5rem;
+            margin: 0 0 10px 0;
+            color: #333;
+        }
+        .header p {
+            color: #6c757d;
+            font-size: 1.1rem;
+            margin: 0;
+        }
+        .fixtures-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 25px;
+            margin-top: 30px;
+        }
+        .fixture-card {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+        .fixture-card h2 {
+            margin: 0 0 20px 0;
+            color: #495057;
+            font-size: 1.4rem;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #dee2e6;
+        }
+        .match-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .match-item {
+            padding: 15px;
+            border-bottom: 1px solid #dee2e6;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .match-item:last-child {
+            border-bottom: none;
+        }
+        .team {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .team img {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+        }
+        .match-time {
+            color: #6c757d;
+            font-size: 0.9rem;
+        }
+        .match-status {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: bold;
+        }
+        .status-live {
+            background: #28a745;
+            color: white;
+        }
+        .status-finished {
+            background: #6c757d;
+            color: white;
+        }
+        .status-scheduled {
+            background: #ffc107;
+            color: #212529;
+        }
+        .back-link {
+            display: inline-block;
+            margin-top: 20px;
+            color: #007bff;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        .back-link:hover {
+            color: #0056b3;
+        }
+        .league-selector {
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .league-selector select {
+            padding: 8px 16px;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            font-size: 1rem;
+            margin-right: 10px;
+        }
+        .league-selector button {
+            padding: 8px 16px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1rem;
+        }
+        .league-selector button:hover {
+            background: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📅 MatchPulse Fixtures</h1>
+            <p>Season {{.CurrentSeason}} - Matchweek {{.CurrentMatchweek}}</p>
+            <div class="league-selector">
+                <select id="league-select" onchange="updateFixtures()">
+                    <option value="Premier League">Premier League</option>
+                    <option value="Community League">Community League</option>
+                </select>
+                <button onclick="updateFixtures()">View Fixtures</button>
+            </div>
+        </div>
+        <div class="fixtures-container" id="fixtures-container">
+            <!-- Fixtures will be loaded here via JavaScript -->
+        </div>
+        <a href="/" class="back-link">← Back to Home</a>
+    </div>
+    <script>
+        function updateFixtures() {
+            const league = document.getElementById('league-select').value;
+            fetch('/api/v1/fixtures/' + encodeURIComponent(league))
+                .then(response => response.json())
+                .then(data => {
+                    const container = document.getElementById('fixtures-container');
+                    container.innerHTML = '';
+                    
+                    // Group fixtures by matchday
+                    const matchdays = {};
+                    data.fixtures.forEach(fixture => {
+                        if (!matchdays[fixture.matchday]) {
+                            matchdays[fixture.matchday] = [];
+                        }
+                        matchdays[fixture.matchday].push(fixture);
+                    });
+
+                    // Sort matchdays
+                    const sortedMatchdays = Object.keys(matchdays).sort((a, b) => a - b);
+
+                    // Create fixture cards for each matchday
+                    sortedMatchdays.forEach(matchday => {
+                        const fixtures = matchdays[matchday];
+                        const card = document.createElement('div');
+                        card.className = 'fixture-card';
+                        
+                        let html = '<h2>Matchday ' + matchday + '</h2>';
+                        html += '<ul class="match-list">';
+                        
+                        fixtures.forEach(fixture => {
+                            const statusClass = fixture.is_played ? 'status-finished' : 
+                                             fixture.match_id ? 'status-live' : 'status-scheduled';
+                            const statusText = fixture.is_played ? 'Finished' : 
+                                             fixture.match_id ? 'Live' : 'Scheduled';
+                            
+                            html += "<li class=\"match-item\">" +
+                                "<div class=\"team\">" +
+                                "<img src=\"" + fixture.home_team.logo_url + "\" alt=\"" + fixture.home_team.name + "\">" +
+                                "<span>" + fixture.home_team.name + "</span>" +
+                                "</div>" +
+                                "<div class=\"match-time\">" +
+                                new Date(fixture.scheduled_at).toLocaleString() +
+                                "</div>" +
+                                "<div class=\"team\">" +
+                                "<span>" + fixture.away_team.name + "</span>" +
+                                "<img src=\"" + fixture.away_team.logo_url + "\" alt=\"" + fixture.away_team.name + "\">" +
+                                "</div>" +
+                                "<span class=\"match-status " + statusClass + "\">" + statusText + "</span>" +
+                                "</li>";
+                        });
+                        
+                        html += '</ul>';
+                        card.innerHTML = html;
+                        container.appendChild(card);
+                    });
+                })
+                .catch(error => {
+                    console.error('Error loading fixtures:', error);
+                    document.getElementById('fixtures-container').innerHTML = 
+                        '<div class="error">Error loading fixtures. Please try again later.</div>';
+                });
+        }
+
+        // Load fixtures when page loads
+        document.addEventListener('DOMContentLoaded', updateFixtures);
+    </script>
+</body>
+</html>`
+
+	tmpl, err := template.New("fixtures").Parse(htmlTemplate)
+	if err != nil {
+		http.Error(w, "Template error", http.StatusInternalServerError)
+		return
+	}
+
+	err = tmpl.Execute(w, templateData)
+	if err != nil {
+		http.Error(w, "Template execution error", http.StatusInternalServerError)
+		return
+	}
 }
