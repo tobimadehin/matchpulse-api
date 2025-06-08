@@ -2019,6 +2019,11 @@ func getMatchProbabilities(w http.ResponseWriter, r *http.Request) {
 	match := matches[id]
 	mutex.RUnlock()
 
+	if match == nil {
+		http.Error(w, "Match not found", http.StatusNotFound)
+		return
+	}
+
 	response := map[string]interface{}{
 		"match_id":  id,
 		"timestamp": time.Now(),
@@ -2026,9 +2031,10 @@ func getMatchProbabilities(w http.ResponseWriter, r *http.Request) {
 
 	if probs != nil {
 		response["probabilities"] = probs
-	} else if match != nil {
+	} else {
 		// Calculate initial probabilities if none exist
 		homeWin, draw, awayWin := calculateMatchProbabilities(&match.HomeTeam, &match.AwayTeam)
+
 		response["probabilities"] = map[string]interface{}{
 			"home_win_prob": homeWin,
 			"draw_prob":     draw,
@@ -2036,9 +2042,6 @@ func getMatchProbabilities(w http.ResponseWriter, r *http.Request) {
 			"calculated_at": time.Now(),
 			"note":          "Initial pre-match probabilities",
 		}
-	} else {
-		response["probabilities"] = nil
-		response["message"] = "Match not found"
 	}
 
 	w.Header().Set("Content-Type", "application/json")
