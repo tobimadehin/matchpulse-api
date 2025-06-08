@@ -778,7 +778,7 @@ func startSimulationEngine() {
 	// Create a context that won't be cancelled immediately
 	ctx := context.Background()
 
-	// Only start goroutines that actually do different work
+	// Goroutines working in parallel
 	go matchEngine(ctx)         // Handles live match simulation
 	go seasonManager(ctx)       // Handles season transitions
 	go statisticsProcessor(ctx) // Processes player/team stats
@@ -1644,15 +1644,15 @@ func updateGlobalStatsLoop() {
 }
 
 func seasonManager(ctx context.Context) {
-	logInfo("🏆 Season manager started - checking daily")
-	// Only runs when there's actual season management work
-	seasonTicker := time.NewTicker(24 * time.Hour) // Check daily
+	logInfo("🏆 Season manager started - checking every 5 minutes")
+	// Check more frequently for season end
+	seasonTicker := time.NewTicker(5 * time.Minute) // Check every 5 minutes
 	defer seasonTicker.Stop()
 
 	for {
 		select {
 		case <-seasonTicker.C:
-			logInfo("🗓️  Daily season check: Season %d, Week %d", currentSeason, currentMatchweek)
+			logInfo("🗓️  Season check: Season %d, Week %d", currentSeason, currentMatchweek)
 			if shouldEndSeason() {
 				logInfo("🏁 Ending season %d...", currentSeason)
 				procesSeasonEnd()
@@ -1691,13 +1691,34 @@ func updateLeagueTable(match *Match) {
 	logInfo("📊 Updating league table after match %d", match.ID)
 
 	// Update season progress when match finishes
-	currentMatchweek++
-	if currentMatchweek > SeasonMatches {
-		logInfo("🏁 Season complete! Starting season transition...")
-		endSeason()
+	if match.Status == StatusFinished {
+		// Update matchweek only when all matches for current matchweek are finished
+		allMatchesFinished := true
+		for _, league := range []string{LeaguePremier, LeagueCommunityLeague} {
+			if schedules := getScheduledMatches(league, currentMatchweek); len(schedules) > 0 {
+				for _, schedule := range schedules {
+					if !schedule.IsPlayed {
+						allMatchesFinished = false
+						break
+					}
+				}
+			}
+		}
+
+		if allMatchesFinished {
+			currentMatchweek++
+			logInfo("📅 Advancing to matchweek %d", currentMatchweek)
+
+			// Check if season should end after advancing matchweek
+			if shouldEndSeason() {
+				logInfo("🏁 Season complete! Starting season transition...")
+				procesSeasonEnd()
+				startNewSeason()
+			}
+		}
 	}
 
-	// Immediately update league standings when match finishes
+	// Update team stats
 	if match.HomeScore > match.AwayScore {
 		// Home win
 		updateTeamStats(match.HomeTeam.ID, 3, 1, 0, 0, match) // 3 points, 1 win
@@ -2686,19 +2707,71 @@ func max(a, b int) int {
 }
 
 func shouldEndSeason() bool {
-	return currentMatchweek > SeasonMatches
+	// Check if all matches in all leagues are finished
+	for _, league := range []string{LeaguePremier, LeagueCommunityLeague} {
+		if schedules, exists := seasonSchedules[league]; exists {
+			for _, schedule := range schedules {
+				if !schedule.IsPlayed {
+					return false
+				}
+			}
+		}
+	}
+	return true
 }
 
 func procesSeasonEnd() {
-	endSeason()
+	logInfo("🏁 Processing end of season %d...", currentSeason)
+
+	// Calculate season winners and stats
+	seasonWinner := calculateSeasonWinner()
+	topScorer := findTopScorer()
+	topAssists := findTopAssists()
+	mostFouls := findMostFouls()
+	playerOfSeason := findPlayerOfSeason()
+
+	// Store season history
+	seasonRecord := SeasonHistory{
+		Season:         currentSeason,
+		TopScorer:      *topScorer,
+		TopAssists:     *topAssists,
+		MostFouls:      *mostFouls,
+		PlayerOfSeason: *playerOfSeason,
+		Champion:       *seasonWinner,
+		TotalGoals:     calculateTotalSeasonGoals(),
+		TotalMatches:   SeasonMatches,
+		EndDate:        time.Now(),
+	}
+
+	seasonHistory = append(seasonHistory, seasonRecord)
+	if len(seasonHistory) > MaxSeasonHistory {
+		seasonHistory = seasonHistory[1:]
+	}
+
+	logInfo("🥇 Season %d Champions: %s", currentSeason, seasonWinner.Name)
+	logInfo("⚽ Top Scorer: %s (%d goals)", topScorer.Name, topScorer.SeasonStats.GoalsThisSeason)
+	logInfo("🅰️  Top Assists: %s (%d assists)", topAssists.Name, topAssists.SeasonStats.AssistsThisSeason)
 }
 
 func startNewSeason() {
-	log.Printf("🆕 Starting season %d...", currentSeason)
+	logInfo("🆕 Starting season %d...", currentSeason+1)
+
+	// Reset for new season
 	resetForNewSeason()
+
+	// Increment season and reset matchweek
 	currentSeason++
 	currentMatchweek = 1
+
+	// Generate new season schedules for all leagues
+	for league := range leagueConfigs {
+		generateSeasonSchedule(league)
+	}
+
+	// Create initial matches
 	createNextMatch()
+
+	logInfo("✅ Season %d started successfully", currentSeason)
 }
 
 func batchUpdatePlayerStats() {
